@@ -1,0 +1,21 @@
+{
+  "Name": "Enterprise Data Quality at Scale in Fabric-Candidate",
+  "Description": "Custom RBAC role for the Enterprise Data Quality at Scale in Fabric candidate sandbox",
+  "IsCustom": true,
+  "Actions": [
+    "Microsoft.Resources/deployments/*",
+    "Microsoft.Resources/subscriptions/resourceGroups/read",
+    "Microsoft.Compute/virtualMachines/*",
+    "Microsoft.Network/*",
+    "Microsoft.Storage/storageAccounts/*",
+    "Microsoft.Insights/*",
+    "Microsoft.Authorization/*/read"
+  ],
+  "NotActions": [
+    "Microsoft.Authorization/*/Write",
+    "Microsoft.Authorization/*/Delete"
+  ],
+  "AssignableScopes": [
+    "/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/rg-candidate-{DEPLOYMENT_ID}"
+  ]
+}

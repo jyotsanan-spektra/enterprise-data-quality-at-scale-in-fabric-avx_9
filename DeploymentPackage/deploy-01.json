@@ -1,0 +1,457 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "azureUserName": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure AD user UPN provided by CloudLabs."
+      }
+    },
+    "azurePassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Azure AD user password provided by CloudLabs."
+      }
+    },
+    "ODLID": {
+      "type": "string",
+      "metadata": {
+        "description": "CloudLabs ODL identifier."
+      }
+    },
+    "DeploymentID": {
+      "type": "string",
+      "metadata": {
+        "description": "Unique deployment identifier used for resource naming."
+      }
+    },
+    "adminUsername": {
+      "type": "string",
+      "metadata": {
+        "description": "Local administrator username for the lab VM."
+      }
+    },
+    "adminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Local administrator password for the lab VM."
+      }
+    },
+    "trainerUserName": {
+      "type": "string",
+      "metadata": {
+        "description": "Trainer/local support account username for VM Shadow access."
+      }
+    },
+    "trainerUserPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Trainer/local support account password for VM Shadow access."
+      }
+    },
+    "openAiDeploymentName": {
+      "type": "string",
+      "defaultValue": "gpt-4o-mini",
+      "metadata": {
+        "description": "Azure OpenAI deployment name exposed to learners."
+      }
+    }
+  },
+  "variables": {
+    "scripturl": "https://experienceazure.blob.core.windows.net/templates/cloudlabs-common/fabric/psscript-01.ps1",
+    "LabVMName": "[concat('labvm-', toLower(parameters('DeploymentID')))]",
+    "vnetName": "[concat('vnet-', toLower(parameters('DeploymentID')))]",
+    "subnetName": "default",
+    "nsgName": "[concat('nsg-', toLower(parameters('DeploymentID')))]",
+    "pipName": "[concat('pip-', toLower(parameters('DeploymentID')))]",
+    "nicName": "[concat('nic-', toLower(parameters('DeploymentID')))]",
+    "dnsLabel": "[toLower(concat('cl', uniqueString(resourceGroup().id, parameters('DeploymentID'))))]",
+    "openAiAccountName": "[tolower(concat('aoai', uniqueString(subscription().subscriptionId, resourceGroup().id, parameters('DeploymentID'))))]",
+    "aiHubName": "[substring(concat('hub', uniqueString(resourceGroup().id, parameters('DeploymentID'))), 0, 16)]",
+    "aiProjectName": "[substring(concat('proj', uniqueString(subscription().subscriptionId, parameters('DeploymentID'))), 0, 16)]",
+    "storageAccountName": "[substring(toLower(concat('st', uniqueString(resourceGroup().id, parameters('DeploymentID')))), 0, 24)]",
+    "keyVaultName": "[substring(concat('kv-', uniqueString(subscription().tenantId, resourceGroup().id, parameters('DeploymentID'))), 0, 24)]",
+    "appInsightsName": "[substring(concat('appi-', uniqueString(resourceGroup().id, parameters('DeploymentID'))), 0, 24)]",
+    "containerRegistryName": "[substring(toLower(concat('cr', uniqueString(subscription().subscriptionId, resourceGroup().id, parameters('DeploymentID')))), 0, 50)]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('nsgName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow-RDP",
+            "properties": {
+              "priority": 1000,
+              "access": "Allow",
+              "direction": "Inbound",
+              "protocol": "Tcp",
+              "sourcePortRange": "*",
+              "destinationPortRange": "3389",
+              "sourceAddressPrefix": "*",
+              "destinationAddressPrefix": "*"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('pipName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Static",
+        "publicIPAddressVersion": "IPv4",
+        "dnsSettings": {
+          "domainNameLabel": "[variables('dnsLabel')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('vnetName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+      ],
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "10.10.0.0/16"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetName')]",
+            "properties": {
+              "addressPrefix": "10.10.0.0/24",
+              "networkSecurityGroup": {
+                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2024-05-01",
+      "name": "[variables('nicName')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('subnetName'))]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot",
+        "allowBlobPublicAccess": false,
+        "allowCrossTenantReplication": false,
+        "allowSharedKeyAccess": true,
+        "defaultToOAuthAuthentication": false,
+        "minimumTlsVersion": "TLS1_2",
+        "publicNetworkAccess": "Enabled",
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "enableRbacAuthorization": true,
+        "enableSoftDelete": true,
+        "enabledForDeployment": false,
+        "enabledForDiskEncryption": false,
+        "enabledForTemplateDeployment": false,
+        "publicNetworkAccess": "Enabled",
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('appInsightsName')]",
+      "location": "[resourceGroup().location]",
+      "kind": "web",
+      "properties": {
+        "Application_Type": "web",
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('containerRegistryName')]",
+      "location": "[resourceGroup().location]",
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "adminUserEnabled": true,
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2025-06-01",
+      "name": "[variables('openAiAccountName')]",
+      "location": "[resourceGroup().location]",
+      "kind": "OpenAI",
+      "sku": {
+        "name": "S0"
+      },
+      "properties": {
+        "customSubDomainName": "[variables('openAiAccountName')]",
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "apiVersion": "2023-05-01",
+      "name": "[concat(variables('openAiAccountName'), '/', parameters('openAiDeploymentName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName'))]"
+      ],
+      "sku": {
+        "name": "Standard",
+        "capacity": 10
+      },
+      "properties": {
+        "model": {
+          "format": "OpenAI",
+          "name": "gpt-4o-mini",
+          "version": "2024-07-18"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.MachineLearningServices/workspaces",
+      "apiVersion": "2023-10-01",
+      "name": "[variables('aiHubName')]",
+      "kind": "Hub",
+      "location": "[resourceGroup().location]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]"
+      ],
+      "sku": {
+        "name": "Basic",
+        "tier": "Basic"
+      },
+      "properties": {
+        "friendlyName": "Azure AI Foundry Hub",
+        "description": "Hub workspace for the self-contained CloudLabs AI dependencies.",
+        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "containerRegistry": "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
+        "publicNetworkAccess": "Enabled",
+        "allowPublicAccessWhenBehindVnet": true,
+        "v1LegacyMode": false
+      }
+    },
+    {
+      "type": "Microsoft.MachineLearningServices/workspaces",
+      "apiVersion": "2023-10-01",
+      "name": "[variables('aiProjectName')]",
+      "kind": "Project",
+      "location": "[resourceGroup().location]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
+      ],
+      "sku": {
+        "name": "Basic",
+        "tier": "Basic"
+      },
+      "properties": {
+        "friendlyName": "Azure AI Foundry Project",
+        "description": "Project workspace associated with the Azure AI Foundry hub for this lab.",
+        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
+        "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
+        "containerRegistry": "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
+        "publicNetworkAccess": "Enabled",
+        "allowPublicAccessWhenBehindVnet": true,
+        "v1LegacyMode": false,
+        "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-08-01",
+      "name": "[variables('LabVMName')]",
+      "location": "[resourceGroup().location]",
+      "plan": {
+        "name": "win2019",
+        "publisher": "spektra",
+        "product": "cloudlabs-windows-jumpvm"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+      ],
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "Standard_B2s"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Spektra",
+            "offer": "cloudlabs-windows-jumpvm",
+            "sku": "win2019",
+            "version": "latest"
+          },
+          "osDisk": {
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "StandardSSD_LRS"
+            }
+          }
+        },
+        "osProfile": {
+          "computerName": "[variables('LabVMName')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            }
+          ]
+        },
+        "diagnosticsProfile": {
+          "bootDiagnostics": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2022-11-01",
+      "name": "[concat(variables('LabVMName'), '/bootstrap')]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
+      ],
+      "properties": {
+        "publisher": "Microsoft.Compute",
+        "type": "CustomScriptExtension",
+        "typeHandlerVersion": "1.10",
+        "autoUpgradeMinorVersion": true,
+        "settings": {
+          "fileUris": [
+            "[variables('scripturl')]"
+          ]
+        },
+        "protectedSettings": {
+          "commandToExecute": "[concat('powershell -ExecutionPolicy Bypass -File psscript-01.ps1 -AzureUserName \"', parameters('azureUserName'), '\" -AzurePassword \"', parameters('azurePassword'), '\" -AzureTenantID \"', subscription().tenantId, '\" -AzureSubscriptionID \"', subscription().subscriptionId, '\" -ODLID \"', parameters('ODLID'), '\" -DeploymentID \"', parameters('DeploymentID'), '\" -vmAdminUsername \"', parameters('adminUsername'), '\" -vmAdminPassword \"', parameters('adminPassword'), '\" -trainerUserName \"', parameters('trainerUserName'), '\" -trainerUserPassword \"', parameters('trainerUserPassword'), '\"')]"
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "vmServerDnsName": {
+      "type": "string",
+      "value": "[if(empty(reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').dnsSettings.fqdn), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress, reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').dnsSettings.fqdn)]"
+    },
+    "vmServerUsername": {
+      "type": "string",
+      "value": "[parameters('adminUsername')]"
+    },
+    "vmServerPassword": {
+      "type": "string",
+      "value": "[parameters('adminPassword')]"
+    },
+    "trainerUserName": {
+      "type": "string",
+      "value": "[parameters('trainerUserName')]"
+    },
+    "trainerUserPassword": {
+      "type": "string",
+      "value": "[parameters('trainerUserPassword')]"
+    },
+    "AzureOpenAIAccountName": {
+      "type": "string",
+      "value": "[variables('openAiAccountName')]"
+    },
+    "AzureOpenAIEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName')), '2025-06-01').properties.endpoint]"
+    },
+    "AzureOpenAIApiKey": {
+      "type": "string",
+      "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName')), '2025-06-01').key1]"
+    },
+    "AzureOpenAIDeploymentName": {
+      "type": "string",
+      "value": "[parameters('openAiDeploymentName')]"
+    },
+    "AzureAIFoundryHubName": {
+      "type": "string",
+      "value": "[variables('aiHubName')]"
+    },
+    "AzureAIFoundryHubResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
+    },
+    "AzureAIFoundryProjectName": {
+      "type": "string",
+      "value": "[variables('aiProjectName')]"
+    },
+    "AzureAIFoundryProjectResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiProjectName'))]"
+    }
+  }
+}

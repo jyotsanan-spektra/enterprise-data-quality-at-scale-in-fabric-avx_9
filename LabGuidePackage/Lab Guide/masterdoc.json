@@ -1,0 +1,37 @@
+[
+  {
+    "Name": "Enterprise Data Quality at Scale in Fabric",
+    "Language": "English",
+    "BaseURL": "https://raw.githubusercontent.com/jyotsana-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/main/LabGuidePackage/Lab%20Guide/Lab%20Guide/",
+    "Files": [
+      {
+        "RawFilePath": "GettingStarted-V2.md",
+        "Order": 1
+      },
+      {
+        "RawFilePath": "Exercise-01.md",
+        "Order": 2
+      },
+      {
+        "RawFilePath": "Exercise-02.md",
+        "Order": 3
+      },
+      {
+        "RawFilePath": "Exercise-03.md",
+        "Order": 4
+      },
+      {
+        "RawFilePath": "Exercise-04.md",
+        "Order": 5
+      },
+      {
+        "RawFilePath": "Exercise-05.md",
+        "Order": 6
+      },
+      {
+        "RawFilePath": "Exercise-06.md",
+        "Order": 7
+      }
+    ]
+  }
+]
