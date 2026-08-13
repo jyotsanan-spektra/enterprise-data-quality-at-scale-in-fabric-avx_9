@@ -4,61 +4,86 @@
 
 ## Scenario
 
-In Challenge 1, you confirmed the Fabric workspace and created or validated the medallion-aligned control-plane items that this lab uses. In this challenge, you will build on those learner-created Fabric items by implementing SCD Type 2 history tracking in the Gold warehouse customer dimension so customer attribute changes create new current rows while preserving prior versions for historical analysis.
+The Contoso operations team needs the Gold layer to preserve customer attribute history instead of overwriting prior values. In this challenge, you will use the Warehouse item you created in Challenge 1 to build a customer dimension that supports SCD Type 2 behavior, run an initial load, process a change set, and prove that historical and current customer versions are stored correctly.
 
 ## Overview
 
-In this challenge, you will use the workspace and Warehouse item you established earlier in the lab, define the Gold customer dimension for history tracking, implement an incremental SCD Type 2 load pattern, and validate that changed customers retain both current and expired versions.
+In this challenge, you will open your Fabric Warehouse, create a customer dimension table with surrogate-key and history-tracking columns, load the first version of the customer records, apply a second load that contains customer changes, and validate that changed customers now have expired and current versions side by side.
 
 ## Objectives
 
-- Task 1: Extend the Gold Warehouse customer dimension for history tracking
-- Task 2: Implement the incremental SCD Type 2 load pattern
-- Task 3: Validate current and expired customer versions
+- Task 1: Create the customer dimension table in the Gold Warehouse
+- Task 2: Load the initial customer dimension rows
+- Task 3: Apply SCD Type 2 changes and validate history
 
-## Task 1: Extend the Gold Warehouse customer dimension for history tracking
+## Task 1: Create the customer dimension table in the Gold Warehouse
 
-In this task, you will build on the Microsoft Fabric items you created or confirmed in Challenge 1 and prepare the Gold dimension design for historical tracking.
+In this task, you will open the Warehouse from Challenge 1 and create the customer dimension structure required for Type 2 history tracking.
 
-1. Sign in to Microsoft Fabric with the lab-provided account linked to your sandbox. When prompted for credentials, use:
+1. Open Microsoft Fabric at <https://app.fabric.microsoft.com> and sign in with the lab credentials if you are prompted:
    - Username: <inject key="AzureAdUserEmail"></inject>
    - Password: <inject key="AzureAdUserPassword"></inject>
-2. Open the same Fabric workspace you used in Challenge 1, and locate the Warehouse item that you created or validated there for the Gold layer.
-3. Confirm that you will use that existing learner-created Warehouse item for this challenge rather than relying on any pre-seeded Gold warehouse objects.
-4. Create or update a customer dimension table in your Warehouse so it supports SCD Type 2 history instead of in-place overwrite behavior.
-5. Ensure the dimension design includes a surrogate key, a stable customer business key, valid-from and valid-to fields, and a current-row indicator so multiple versions of the same customer can coexist.
-6. Verify that your design supports one current row and zero or more expired rows for each customer business key.
-7. Record the deployment context for your run using **Deployment ID: <inject key="DeploymentID" enableCopy="false"/>** so you can reference it during validation.
+2. Open the workspace you used earlier in the lab, and then select the Warehouse item you created for the Gold layer in Challenge 1.
+3. On the Warehouse ribbon, select **New SQL query** to open the SQL query editor.
+4. Create a new dimension table for customer history. Your table must include the following logical elements:
+   - A surrogate key column for the warehouse dimension row
+   - A customer business key column that remains stable across versions
+   - Customer descriptive attributes you plan to track, such as name, city, state, segment, or status
+   - An effective start column
+   - An effective end column
+   - A current-row flag
+5. Use a Fabric Warehouse-supported table definition. If you want to use an automatically generated surrogate key, define it with a `BIGINT IDENTITY` column because that is the supported identity pattern for Warehouse in Microsoft Fabric.
+6. Run the create-table statement, and then refresh the Warehouse explorer to confirm the customer dimension table appears.
+7. Record the deployment context for this lab run using **<inject key="DeploymentID" enableCopy="false"/>** so you can tie your validation evidence to the correct environment.
 
 > [!Important]
-> Microsoft Learn guidance for Fabric Warehouse recommends preserving surrogate-keyed dimensions incrementally. For SCD Type 2 dimensions, avoid truncate-and-reload patterns that would break historical versions and downstream fact relationships.
+> Microsoft Learn documents table creation in Fabric Warehouse through the SQL query editor and notes that `IDENTITY` surrogate keys use the `BIGINT` data type. Keep the dimension in the Warehouse item itself, not in the SQL analytics endpoint of another item.
 
-## Task 2: Implement the incremental SCD Type 2 load pattern
+## Task 2: Load the initial customer dimension rows
 
-In this task, you will load customer changes into the Warehouse item from Challenge 1 by expiring prior versions and inserting new current rows.
+In this task, you will populate the first version of the customer dimension so you have a baseline state before any tracked changes occur.
 
-1. Use the customer source and staging data available in your lab environment to identify which customer attributes should be treated as Type 2 changes.
-2. Build or complete an incremental load process in your Fabric solution that compares incoming customer records with the current customer dimension rows by business key.
-3. For customers that do not yet exist in the dimension, insert new rows with a surrogate key, a valid-from value, an open-ended valid-to value, and the current-row indicator set to true.
-4. For customers whose tracked attributes have changed, expire the existing current row by setting its valid-to value to the processing date or timestamp and changing the current-row indicator to false.
-5. Insert a replacement current row for each changed customer with a new surrogate key, updated attribute values, a new valid-from value, and the current-row indicator set to true.
-6. Run the incremental load against the prepared customer changes and confirm that your process updates only the affected dimension members instead of rebuilding the entire table.
+1. Identify the prepared customer source data provided for this lab scenario and review the columns that represent the customer business key and the tracked descriptive attributes.
+2. In the SQL query editor, write the initial load statement that inserts one row per customer into your Gold customer dimension.
+3. Set the effective start column to the load date or load timestamp used by your implementation.
+4. Set the effective end column to an open-ended value that represents the active version in your design.
+5. Set the current-row flag so every baseline row is marked as current.
+6. Run the initial load.
+7. Query the dimension table and confirm that each customer business key currently appears only once.
+8. Save or note the baseline row count because you will compare it after the Type 2 change processing step.
 
 > [!Note]
-> Microsoft Learn describes SCD Type 2 handling in Fabric as a pattern where the prior current row is expired and a new versioned row is inserted. This preserves point-in-time history while keeping exactly one row current for a business key.
+> An initial SCD Type 2 load behaves like a full current snapshot: all rows are inserted as the first active versions. Versioning behavior becomes visible only when a later change set modifies tracked attributes for an existing customer.
 
-## Task 3: Validate current and expired customer versions
+## Task 3: Apply SCD Type 2 changes and validate history
 
-In this task, you will verify that the customer dimension in your learner-created Warehouse now preserves history correctly.
+In this task, you will process the prepared customer changes by expiring prior rows and inserting replacement current rows, then verify the final state with SQL queries.
 
-1. Query the customer dimension in the same Warehouse item from Challenge 1 and inspect at least one customer affected by the prepared incremental change set.
-2. Confirm that the changed customer now has multiple dimension rows tied to the same business key.
-3. Verify that the prior version is no longer current, that the latest version is marked current, and that the valid-from and valid-to values reflect the load event.
-4. Confirm that unchanged customers still have a single current row and were not duplicated unnecessarily.
-5. Capture query evidence that proves surrogate key versioning, business key continuity, effective dating, and current-versus-expired row state.
+1. Review the provided customer change set and identify which customers have tracked attribute changes.
+2. In your Warehouse load logic, match incoming rows to the current customer dimension row by business key.
+3. For every matched customer whose tracked attributes changed, update the existing current row so it is no longer current and set its effective end value to the processing date or timestamp.
+4. Insert a new row for each changed customer with:
+   - A new surrogate key
+   - The same customer business key
+   - The updated attribute values
+   - A new effective start value
+   - The open-ended effective end value
+   - The current-row flag set to true
+5. For customers with no tracked attribute changes, do not create duplicate rows.
+6. Run the change-processing logic.
+7. Query the customer dimension and confirm that at least one changed customer now has two versions tied to the same business key.
+8. Run validation queries that prove all of the following:
+   - The older row is expired
+   - The new row is current
+   - Only one current row exists per business key
+   - Unchanged customers still have a single row
+9. Capture the output of your validation queries for your records.
+
+> [!Tip]
+> Microsoft Learn describes the Type 2 pattern as expiring the old version and inserting a new current version rather than updating the descriptive values in place. If your result shows one overwritten row instead of two versions for a changed customer, the dimension is not behaving as Type 2.
 
 <validation step="Validate SCD Type 2 behavior in the customer dimension, including current/expired row states."/>
 
 ## Summary
 
-In this challenge, you extended the Fabric Warehouse item you created or validated earlier in the lab and implemented SCD Type 2 history tracking for the Gold customer dimension. You confirmed that incremental customer changes create new current rows, prior versions are expired correctly, and historical context is preserved for downstream reporting and analysis.
+In this challenge, you created a Gold customer dimension in Fabric Warehouse, loaded its initial customer records, applied Type 2 change processing, and verified that changed customers now have both historical and current versions. The Warehouse is now ready to support downstream reporting and orchestration steps that depend on preserved customer history.
