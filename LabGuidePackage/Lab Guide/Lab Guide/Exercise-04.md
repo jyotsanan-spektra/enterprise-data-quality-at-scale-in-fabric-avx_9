@@ -3,60 +3,76 @@
 ### Estimated Duration: 40 Minutes
 
 ## Scenario
-In Challenge 1, you confirmed the workspace foundation and either created or validated the Fabric control-plane items required for this lab. In this challenge, you will build on those learner-owned items by using the notebook and Lakehouse structure from your earlier work to enforce data quality before curated data can move from Bronze to Silver.
+The CDC process you configured earlier now lands operational changes in the Bronze layer, but Bronze data isn't trusted automatically. In this challenge, you will build a PySpark quality gate in Microsoft Fabric so that `bronze_orders_cdc` is promoted to `silver_orders` only when required checks pass. You will also capture failure evidence that can be reused in the final orchestration challenge.
 
 ## Overview
-You will use the Lakehouse, notebook, and table design established in earlier challenges to implement a PySpark quality gate for orders data. You will define the required rules, evaluate `bronze_orders_cdc`, record the outcome, and ensure that `silver_orders` is only refreshed when the validation result is successful. You will then introduce a controlled defect and prove that your quality gate blocks promotion.
+You will open or create a Fabric notebook, attach it to your Lakehouse, and implement five explicit validations against the Bronze orders table: null, range, referential integrity, freshness, and schema checks. You will then add conditional write logic so `silver_orders` is updated only when all rules pass, record the quality results, and rerun the notebook with a controlled defect to verify that promotion is blocked.
 
 ## Objectives
-- Task 1: Reuse the Fabric items established in Challenge 1 for the quality-gate design
-- Task 2: Implement PySpark validation logic against Bronze orders data
-- Task 3: Prove that failed validation blocks Silver promotion and creates observable evidence
+- Task 1: Prepare the Lakehouse and notebook context for the quality gate
+- Task 2: Implement and run the PySpark quality checks
+- Task 3: Trigger the failure path and confirm Silver promotion is blocked
 
-## Task 1: Reuse the Fabric items established in Challenge 1 for the quality-gate design
-In this task, you will confirm the learner-created Fabric items that this challenge depends on and align them to the Bronze-to-Silver quality pattern.
+## Task 1: Prepare the Lakehouse and notebook context for the quality gate
+
+In this task, you will return to your learner-created Fabric items and prepare the notebook environment that will enforce the Bronze-to-Silver gate.
 
 1. Sign in to Microsoft Fabric by using Username: <inject key="AzureAdUserEmail"></inject> and Password: <inject key="AzureAdUserPassword"></inject>.
-2. Return to the same Fabric workspace you reviewed in Challenge 1 and record the deployment reference **<inject key="DeploymentID" enableCopy="false"/>** so your notebook and validation evidence can be tied to the correct lab environment.
-3. Confirm that you are working with the Fabric items you established earlier in the lab rather than any assumed pre-seeded objects. At minimum, identify the workspace, the Lakehouse that holds your Bronze and Silver tables, and the notebook artifact you will use or create for data quality processing.
-4. Verify that the Bronze-side ingestion work from Challenge 2 produced the `bronze_orders_cdc` Delta table in your Lakehouse and that the Silver target `silver_orders` is the curated destination this challenge will protect.
-5. Reconfirm the medallion responsibilities for these items: Bronze preserves landed operational change data, Silver contains validated and promoted data, and the notebook provides the Spark-based processing logic that enforces the gate between them.
-6. Define the success criteria for the quality gate: null checks, value-range checks, referential integrity checks, freshness checks, and schema-conformance checks must all pass before the Silver write is allowed.
-
-> [!Important]
-> Do not assume any notebook, pipeline, semantic model, warehouse, or other Fabric control-plane item was provisioned for you beyond what you explicitly confirmed or created in Challenge 1. This challenge must build on the items already present in your own workspace scope.
-
-## Task 2: Implement PySpark validation logic against Bronze orders data
-In this task, you will use a Fabric notebook to evaluate Bronze orders data before any Silver-layer write occurs.
-
-1. Open the notebook artifact you created earlier for engineering work, or create a new notebook now in the same workspace if you did not already create one in Challenge 1.
-2. Attach the notebook to the Lakehouse that contains `bronze_orders_cdc` so the notebook can read the Bronze table and write any approved output to the Silver layer.
-3. Use PySpark to load `bronze_orders_cdc` into a DataFrame and profile the dataset so you can measure row counts, required columns, and data conditions before promotion.
-4. Implement a null-check rule for required order columns so incomplete records are identified before curation.
-5. Implement value-range checks for business-critical numeric or domain fields so invalid quantities, amounts, or other out-of-range values are rejected.
-6. Implement a referential integrity check that confirms orders can be matched to the required lookup or parent data used by your design.
-7. Implement a freshness check that verifies the Bronze data reflects recent CDC activity rather than stale ingestion output.
-8. Implement a schema-conformance check that compares the incoming structure to the expected Silver-ready contract and flags drift or missing fields.
-9. Aggregate the five rule outcomes into a single pass/fail result that the notebook can use to control whether `silver_orders` is written.
-10. Write clear quality evidence to a log table, notebook result set, or durable output artifact so another reviewer can tell which rule passed or failed without repeating the run.
-11. Execute the notebook against a clean Bronze state and confirm that the rule set passes and that the notebook permits promotion to `silver_orders`.
+2. Open the Fabric workspace you used in the previous challenges.
+3. Note the deployment reference for this lab environment as **<inject key="DeploymentID" enableCopy="false"/>**.
+4. Open the Lakehouse you created or confirmed in Challenge 1.
+5. In the **Tables** pane, confirm that the Bronze table `bronze_orders_cdc` exists.
+6. Confirm whether `silver_orders` already exists. If it does, keep it as the target curated table for this challenge. If it doesn't exist yet, you will create it from the notebook only after the quality checks pass.
+7. From the Lakehouse page, select **Open notebook** and then choose an existing notebook you want to reuse, or create a new notebook for this challenge.
+8. If more than one Lakehouse is attached to the notebook, make sure the correct Lakehouse is pinned as the default Lakehouse before you run Spark SQL or use relative table paths.
+9. In the first notebook cell, run a simple check to verify that `bronze_orders_cdc` can be queried successfully and review the available columns before you add validation logic.
 
 > [!Note]
-> Microsoft Learn describes notebooks as Fabric data engineering artifacts for ingestion, preparation, and transformation, and positions lakehouses as the storage foundation for Spark-based processing. Keep your implementation centered on the notebook and Lakehouse items you control in this workspace.
+> Microsoft Learn notes that the pinned default Lakehouse determines the root context for relative paths and Spark SQL in a notebook. Verify the correct Lakehouse is pinned before you run validation code.
 
-## Task 3: Prove that failed validation blocks Silver promotion and creates observable evidence
-In this task, you will demonstrate that the quality gate protects the Silver layer by stopping promotion when the Bronze dataset is invalid.
+## Task 2: Implement and run the PySpark quality checks
 
-1. Update or confirm your notebook logic so that the write to `silver_orders` occurs only when the aggregated quality result is successful.
-2. Make the blocking behavior explicit and testable by returning a failed notebook outcome, raising an error, or otherwise surfacing a clear failure condition when any rule breaches its threshold.
-3. Introduce the planned controlled defect into the Bronze-side test path by using the lab data variation intended to trigger one of your quality rules.
-4. Rerun the notebook and verify that the quality output identifies the failed rule and captures enough detail to explain why promotion was denied.
-5. Confirm that `silver_orders` is not refreshed from the defective Bronze state and that the previously valid Silver result remains protected.
-6. Review the evidence generated by the notebook run and summarize which rule failed, what threshold or condition was violated, and how the notebook signaled the failure.
-7. Preserve the notebook, the quality evidence, and the resulting table state for downstream orchestration work in the next challenge.
+In this task, you will build the step-by-step validation logic that determines whether Bronze data is allowed into the Silver layer.
+
+1. Add a new notebook section named **Quality gate setup**.
+2. Load `bronze_orders_cdc` into a Spark DataFrame by using either `spark.read.format("delta").load("Tables/bronze_orders_cdc")` or a Spark SQL query against the table.
+3. Display the schema and a sample of rows so you can confirm the dataset matches what was ingested during the CDC challenge.
+4. Define the expected business-critical columns you will validate, such as order identifier, customer identifier, product identifier, order date, quantity, and amount fields that exist in your Bronze table.
+5. Create a null-check result that counts records where required fields are blank or null.
+6. Create a range-check result that identifies invalid values, such as negative quantities, zero-or-negative sales amounts, or dates outside the expected business pattern for the supplied dataset.
+7. Create a referential integrity check that verifies the order rows can be matched to the related business key set available in your lab design. Use the lookup or parent table you prepared in earlier challenges, such as customer or product data, and count unmatched records.
+8. Create a freshness check that compares the most recent order change or ingestion timestamp in `bronze_orders_cdc` with the expected recent CDC activity and flags stale data.
+9. Create a schema check that compares the incoming Bronze schema with the column set and data types you expect to promote to Silver.
+10. Combine the five checks into a results DataFrame or Python structure with one row per rule, including at least the rule name, status, failed row count, and a short message.
+11. Display the results so you can visually confirm each rule outcome in the notebook output.
+12. Add logic that evaluates whether any check failed. If one or more checks fail, set an overall gate status of **Failed**. If all checks pass, set the overall gate status of **Passed**.
+13. Create or overwrite a quality evidence table such as `quality_gate_log` in the same Lakehouse so the run results are retained outside the notebook cell output.
+14. Add conditional write logic so `silver_orders` is written only when the overall gate status is **Passed**.
+15. When the gate passes, write the curated DataFrame to `silver_orders` as a Delta table in the Lakehouse.
+16. Run the notebook with the current valid Bronze data and confirm that all five checks pass.
+17. Refresh the Lakehouse **Tables** pane and verify that `silver_orders` exists or was updated after the successful run.
+18. Query `silver_orders` and record the row count so you have baseline evidence before testing the failure path.
+
+> [!Important]
+> Microsoft Learn documents Delta tables in Fabric Lakehouse as the default managed table format and shows `saveAsTable()` as the standard pattern for writing Spark output to Lakehouse tables. Keep the Silver write inside the pass-only branch of your notebook logic.
+
+## Task 3: Trigger the failure path and confirm Silver promotion is blocked
+
+In this task, you will deliberately test the gate with bad data and confirm the notebook records the failure without refreshing the Silver table.
+
+1. Return to the notebook and identify one validation rule you can safely fail by using the lab's controlled defect scenario.
+2. Introduce the planned defect into the Bronze-side test path. For example, use the provided bad-data variation or temporarily shape a test DataFrame so that one of the required columns becomes null, a numeric value falls out of range, or a key no longer matches the lookup data.
+3. Rerun the notebook with the defective input.
+4. Review the displayed quality results and identify which of the five checks failed.
+5. Confirm that the notebook records the failed rule in your quality evidence output, such as the `quality_gate_log` table or equivalent result artifact.
+6. Confirm that the notebook does not write the defective dataset to `silver_orders`.
+7. Query `silver_orders` again and verify that its row count or last valid state remains unchanged from the successful run.
+8. If you are also preparing for Challenge 6, optionally add a final notebook statement that raises an error when the gate status is **Failed** so the pipeline can recognize the failure clearly during orchestration testing.
+9. Save the notebook after both the pass and fail runs are complete.
+10. Keep the Lakehouse, notebook, and logged output available for downstream verification.
 
 <validation step="Spark quality gate behavior"/>
 <question>
 
 ## Summary
-You used the Fabric workspace items established in Challenge 1 to implement a Spark-based quality gate on top of your own Lakehouse and notebook artifacts. By evaluating `bronze_orders_cdc` with five explicit checks, logging the results, and allowing `silver_orders` to refresh only on success, you proved that Silver promotion depends on learner-implemented validation rather than any pre-seeded Fabric processing object.
+You implemented a Fabric notebook that evaluates `bronze_orders_cdc` with null, range, referential integrity, freshness, and schema checks before any Silver promotion occurs. You then wrote `silver_orders` only when the gate passed, captured quality evidence in the Lakehouse, and proved that a controlled defect prevents the Silver layer from being refreshed.
