@@ -1,80 +1,95 @@
 # Getting Started
 
-### Estimated Duration: 20 Minutes
+### Estimated Duration: 25 Minutes
 
 ## Scenario
 
-You are joining a Microsoft Fabric data engineering team responsible for modernizing a Contoso operations analytics platform. The Azure-side sandbox access, identity, and source connectivity prerequisites for the lab are already available, but the Microsoft Fabric implementation is intentionally incomplete. Your goal in this challenge lab is to create the required Fabric items and then complete the engineering work needed to land CDC data into Bronze, enforce quality before Silver promotion, preserve customer history in Gold, recover from a simulated Delta table incident, and orchestrate the workflow with observable run-state evidence.
+You are a data engineer on the Contoso modernization team and have been asked to complete the Microsoft Fabric implementation for an enterprise medallion architecture. The Azure-side sandbox, identity, and source-system prerequisites are already available, but the Fabric data estate is intentionally incomplete. During this challenge lab, you will create the required Fabric items, implement CDC-driven Bronze ingestion, preserve historical customer state in Gold, enforce Silver quality gates with PySpark, recover from a controlled Delta incident, and orchestrate the full process with observable run evidence.
 
 ## Lab Overview
 
-This is an advanced, challenge-based lab built around an enterprise medallion architecture in Microsoft Fabric. Rather than following click-by-click instructions, you will validate the sandbox prerequisites and then complete six outcome-focused challenges. Across the lab, you will work with Fabric workspaces, lakehouses, warehouses, notebooks, and pipelines together with Delta Lake capabilities such as history, time travel, and restore.
+This lab is organized as a six-challenge implementation journey in Microsoft Fabric. Unlike an outcome-only challenge sheet, the guide now gives you a practical action sequence for each challenge while still requiring you to validate the technical result yourself. You will work across Fabric workspace items such as a Lakehouse, Warehouse, notebook, Copy job, and pipeline, and you will confirm the resulting data states by using SQL results, Delta history, notebook output, and pipeline monitoring.
 
-Azure-side sandbox prerequisites exist when you start the lab, including your learner account and the source-side access needed for the Contoso scenario. However, Fabric and Power BI control-plane items such as workspaces, lakehouses, warehouses, notebooks, pipelines, and semantic models should be treated as learner-created artifacts unless a later exercise explicitly has you validate an item you created earlier. Do not assume those items are pre-seeded for you.
+Because Microsoft Fabric items are control-plane objects, you must treat the workspace, Lakehouse, Warehouse, notebook, Copy job, and pipeline used in this lab as learner-created unless a later challenge explicitly tells you to reopen something you created earlier. Do not assume those items already exist in the sandbox.
 
 ## Objectives
 
 By the end of this lab, you will be able to:
 
-- Confirm the target medallion design for the Contoso workload.
-- Create the required Fabric workspace context and core data engineering items for the solution.
-- Implement CDC-driven ingestion into a Bronze Delta table.
-- Build SCD Type 2 history tracking for a customer dimension in a Fabric Warehouse.
-- Enforce Spark-based quality gates before Silver promotion.
-- Investigate and recover a corrupted Delta table by using history and restore capabilities.
-- Orchestrate the end-to-end workflow and validate both success and failure outcomes.
+- Sign in to Azure and Microsoft Fabric by using the lab credentials.
+- Confirm the Contoso medallion target state and create the core Fabric items needed for the lab.
+- Implement CDC-based ingestion from the source system into the Bronze Lakehouse layer.
+- Build Gold-layer customer history tracking by using an SCD Type 2 pattern in a Fabric Warehouse.
+- Use a PySpark notebook to block promotion to Silver when data quality checks fail.
+- Use Delta history and restore capabilities to investigate and recover a corrupted table state.
+- Coordinate ingestion, validation, and dimensional loading through a Fabric Pipeline and verify both success and failure run paths.
 
-## Sign in and access the lab environment
+## Sign in to the lab environment
 
-1. Open <https://portal.azure.com> and sign in with the following credentials:
+1. Open <https://portal.azure.com>.
+2. Sign in with the following credentials:
    - Username: <inject key="AzureAdUserEmail"></inject>
    - Password: <inject key="AzureAdUserPassword"></inject>
-2. Confirm that the active subscription is **<inject key="SubscriptionID"></inject>** and that the Microsoft Entra tenant is **<inject key="TenantID"></inject>**.
-3. Record the deployment reference for this sandbox as **<inject key="DeploymentID" enableCopy="false"></inject>**. You may need it when reviewing environment-specific resources or when working with support staff.
-4. Open the Microsoft Fabric portal at <https://app.fabric.microsoft.com> by using the same lab credentials.
-5. Verify that your account can use Microsoft Fabric capacity in the sandbox and that you can create the Fabric items required by the exercises.
+3. Verify that the active subscription is **<inject key="SubscriptionID"></inject>**.
+4. Verify that the Microsoft Entra tenant is **<inject key="TenantID"></inject>**.
+5. Record the deployment reference as **<inject key="DeploymentID" enableCopy="false"></inject>** for this sandbox session.
+6. Open the Microsoft Fabric portal at <https://app.fabric.microsoft.com> by using the same credentials.
+7. Confirm that you can access a Fabric-capable workspace experience and that you can create new items.
 
 > [!Important]
-> Microsoft Fabric workspaces are collaboration containers for control-plane items such as lakehouses, warehouses, notebooks, pipelines, semantic models, and reports. Those items are not Azure ARM resources and should not be assumed to exist unless you create them during the lab or a task explicitly confirms they were created earlier in your own workflow.
+> Microsoft Fabric workspaces, Lakehouses, Warehouses, notebooks, Copy jobs, and pipelines are not Azure ARM resources. In this lab, those items are created and configured inside the Fabric portal as part of the learner workflow.
 
-## Lab prerequisites
+## Before you begin
 
-Before you begin Challenge 1, make sure the following conditions are true:
+Before starting Challenge 1, verify the following conditions:
 
 - You can access both the Azure portal and the Microsoft Fabric portal.
-- The Contoso operations source connectivity required for ingestion is available in the sandbox.
-- Your Fabric account has enough permissions to create or modify a workspace and the Fabric items used in the lab.
-- PySpark execution is available for notebook-based validation and transformation work.
-- You are comfortable validating outcomes through SQL results, Delta history, notebook output, and pipeline run evidence.
+- Your account has permission to create or modify items in the Fabric workspace used for the lab.
+- The Contoso_Operations source connectivity and source data required by the challenges are already available in the sandbox.
+- PySpark notebook execution is available in Fabric.
+- You are prepared to validate results by inspecting row counts, Delta table history, Warehouse query output, notebook runs, and pipeline activity status.
 
 > [!Note]
-> This lab assumes Azure-side environment preparation and source-side prerequisites are already available. The exercises focus on designing, creating, and validating the required Microsoft Fabric control-plane objects and data flows rather than onboarding external systems from scratch.
+> The sandbox prepares Azure-side dependencies and source prerequisites, but the Fabric implementation work remains part of the lab. Create the Fabric items carefully and keep your naming consistent so later challenges can reuse what you build.
 
 ## Challenge sequence
 
-You will complete the lab through the following six challenges:
+You will complete the lab in the following order:
 
-- **Challenge 1:** Confirm the medallion foundation and create the required Fabric starting point.
+- **Challenge 1:** Confirm the medallion foundation and target state.
 - **Challenge 2:** Implement CDC ingestion into the Bronze layer.
 - **Challenge 3:** Implement SCD Type 2 history in the Gold Warehouse.
 - **Challenge 4:** Enforce Spark-based data quality gates before Silver promotion.
 - **Challenge 5:** Audit, recover, and protect data with Delta Lake time travel.
 - **Challenge 6:** Orchestrate the end-to-end medallion pipeline with internal run-state validation.
 
+## Recommended working approach
+
+Use the following approach throughout the lab:
+
+1. Create the core Fabric items in Challenge 1 and record their names.
+2. Reuse those same items in later challenges instead of creating duplicate assets.
+3. After each challenge, verify the actual technical outcome before you continue.
+4. If a run fails, use built-in Fabric evidence such as notebook output, Copy job history, Warehouse queries, and pipeline monitoring to determine why.
+5. Keep the medallion intent clear:
+   - Bronze captures raw operational changes.
+   - Silver receives only validated data.
+   - Gold exposes business-ready historical structures.
+
 ## Architecture
 
-The solution follows a medallion design in which operational changes land in Bronze, validated and curated records move to Silver, and analytical history is preserved in Gold. In Microsoft Fabric, you will create the workspace-scoped items needed for this pattern, including lakehouse, warehouse, notebook, and pipeline assets, and then connect them into one observable engineering workflow.
+The Contoso solution uses a medallion design in Microsoft Fabric. Operational changes are ingested into Bronze, quality checks determine whether curated data can move to Silver, customer history is preserved in Gold, and a pipeline coordinates the end-to-end process.
 
 ```mermaid
 flowchart LR
-    A[Contoso_Operations SQL Source] --> B[Fabric Copy Activity or Copy Job]
-    B --> C[Bronze Lakehouse Table\nbronze_orders_cdc]
-    C --> D[PySpark Quality Notebook]
-    D -->|Pass| E[Silver Lakehouse Table\nsilver_orders]
-    D -->|Fail| F[Pipeline Logs and Run Evidence]
-    E --> G[Warehouse Load Pattern]
-    G --> H[Gold Customer Dimension\nSCD Type 2]
-    C --> I[Delta History and Restore]
+    A[Contoso_Operations SQL Source] --> B[Fabric Copy job\nCDC or incremental copy]
+    B --> C[Bronze Lakehouse\nbronze_orders_cdc]
+    C --> D[PySpark Notebook\nquality gate]
+    D -->|Pass| E[Silver Lakehouse\nsilver_orders]
+    D -->|Fail| F[Run log and failure evidence]
+    E --> G[Fabric Warehouse\ncustomer dimension load]
+    G --> H[Gold Dimension\nSCD Type 2 history]
+    C --> I[Delta history\nand recovery analysis]
     E --> I
     J[Fabric Pipeline] --> B
     J --> D
@@ -82,49 +97,66 @@ flowchart LR
     J --> F
 ```
 
-## Components explained
+## Solution components
 
-### Contoso_Operations SQL source
+### Source system
 
-This is the operational source system for the lab. It includes CDC-enabled business tables such as Orders, Customers, and Products. Your ingestion work focuses on capturing changes from this source into Fabric rather than performing repeated full loads.
+The source system is the Contoso_Operations SQL workload. It contains operational tables such as Orders, Customers, and Products, and it provides the change activity used for the ingestion and historical tracking tasks in this lab.
 
-### Fabric workspace
+### Workspace
 
-The workspace is the control-plane boundary in which you organize and manage the items required for the lab. A workspace can contain lakehouses, warehouses, notebooks, pipelines, and related analytics artifacts. In this challenge lab, you should expect to create or complete the workspace-scoped implementation needed for the scenario.
+A Fabric workspace is the logical container where you create and manage items such as Lakehouses, Warehouses, notebooks, and pipelines. Microsoft Learn documents the workspace as the place that holds the items required for lakehouse and warehousing solutions, and this lab follows that same pattern.
 
 ### Bronze layer
 
-The Bronze layer stores raw ingested changes in a Fabric Lakehouse using Delta tables. In this lab, `bronze_orders_cdc` is the primary target used to prove baseline ingestion plus incremental change capture.
+The Bronze layer lands raw source changes into Delta tables in a Fabric Lakehouse. In this lab, the key Bronze object is `bronze_orders_cdc`, which you will use to prove both the first load and a later incremental change capture.
 
 ### Silver layer
 
-The Silver layer contains validated and curated data that is promoted only after the quality notebook passes. If quality thresholds fail, downstream promotion must stop and the failure must remain observable in run evidence.
+The Silver layer contains cleaned and validated data. In this lab, `silver_orders` should only be written when the PySpark quality gate passes the required checks.
 
 ### Gold layer
 
-The Gold layer is implemented in a Fabric Warehouse for dimensional modeling and historical analytics. You will build or complete a customer dimension that uses SCD Type 2 techniques such as surrogate keys, effective and expiry dates, and current-row indicators.
+The Gold layer is implemented with a Fabric Warehouse that supports SQL-based dimensional modeling. You will build customer history tracking with an SCD Type 2 pattern that preserves current and expired versions of changed rows.
 
-### Processing layer
+### Copy and transformation services
 
-Processing in this lab combines Fabric Data Factory capabilities for ingestion and movement with PySpark notebook logic for quality checks and Delta-based recovery operations. Fabric lakehouses use Delta Lake tables, enabling history, time travel, and restore scenarios that you will validate during the lab.
+Microsoft Learn describes Fabric Data Factory Copy job as supporting full and incremental copy, including CDC-based incremental replication when the source supports CDC. You will use that pattern to move source changes into Bronze, then use a PySpark notebook to evaluate data quality before promotion.
 
-### Orchestration layer
+### Recovery and observability
 
-A Fabric Pipeline coordinates the main flow of ingestion, validation, and dimensional loading. Instead of relying on external notification systems, you will prove success and failure states through activity status, run logs, outputs, and resulting data state inside the sandbox.
+Fabric Lakehouse tables use Delta Lake format, which enables version history and recovery-oriented workflows. Later in the lab, you will use these capabilities to inspect a corrupted state and restore a known good version. You will also use Fabric Pipeline run history and activity results as the evidence model for orchestration success and failure.
 
-## Success approach
+## What you will create during the lab
 
-To succeed in this lab, focus on the following habits:
+Across the six challenges, you are expected to create or complete the following types of Fabric assets:
 
-- Create only the Fabric items needed to satisfy each challenge outcome and keep their responsibilities aligned to the medallion model.
-- Validate each challenge by proving the expected data state, not just by creating an artifact.
-- Use Delta history, notebook output, and warehouse query results as evidence when troubleshooting.
-- Treat failure handling as a required design outcome, especially for quality gating and orchestration.
-- Preserve observability so that another engineer could review the pipeline and understand why a run succeeded or failed.
+- One Fabric workspace for the Contoso scenario, if a dedicated workspace is not already open for you.
+- A Lakehouse for Bronze and Silver layer tables.
+- A Warehouse for Gold-layer dimensional objects.
+- A Copy job for Bronze ingestion.
+- A PySpark notebook for Silver quality checks and controlled promotion behavior.
+- A Fabric Pipeline that coordinates the end-to-end execution path.
 
-## What to expect next
+> [!Tip]
+> Choose clear, reusable names for your workspace items in Challenge 1 and keep a short record of those names. Later challenges assume you can quickly reopen the same Lakehouse, Warehouse, notebook, and pipeline.
 
-The remaining guide pages are organized as Challenge 1 through Challenge 6. Each challenge asks you to create or extend the Fabric implementation required for a discrete engineering outcome. Read each prompt carefully, create the necessary Fabric control-plane items during the lab, and verify every result before moving on.
+## Evidence you should capture as you work
+
+As you progress through the lab, be ready to confirm the following evidence points:
+
+- The required workspace items exist and match the medallion design.
+- `bronze_orders_cdc` shows an initial load and a later incremental change result.
+- The customer dimension in the Warehouse contains both current and expired rows after change processing.
+- The quality notebook blocks Silver writes when data defects are present.
+- Delta history and recovery actions return the Silver dataset to a known good state.
+- The pipeline shows a successful run for the clean-data path and a blocked or failed downstream path for the defect scenario.
+
+## How the guide is organized
+
+The remaining pages are written as Challenge 1 through Challenge 6. Each challenge includes a concrete implementation sequence so you can build the required Fabric solution step by step while still proving the technical result independently.
+
+When a later challenge says to open an item, use the exact item that you created earlier in this same lab run rather than creating a replacement unless the instructions explicitly require a new object.
 
 ## After publishing
 
