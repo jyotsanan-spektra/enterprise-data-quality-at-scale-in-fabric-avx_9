@@ -23,7 +23,7 @@
     "DeploymentID": {
       "type": "string",
       "metadata": {
-        "description": "Unique deployment identifier used for resource naming. Must be at least 12 characters once hyphens are removed - it is used verbatim by the Lab Guide and by Validations/*.ps1 to compute the validation storage account name."
+        "description": "Unique deployment identifier used for resource naming. The validation storage account name is derived from it as 'stfabricval' plus up to the first 12 characters (hyphens removed, lowercased). Validations/*.ps1 and the VM bootstrap derive the same name, so keep those three formulas in sync."
       }
     },
     "adminUsername": {
@@ -74,7 +74,7 @@
     "nicName": "[concat('nic-', toLower(parameters('DeploymentID')))]",
     "dnsLabel": "[toLower(concat('cl', uniqueString(resourceGroup().id, parameters('DeploymentID'))))]",
     "deploymentIdNoHyphens": "[replace(toLower(parameters('DeploymentID')), '-', '')]",
-    "storageAccountName": "[concat('stfabricval', substring(variables('deploymentIdNoHyphens'), 0, 12))]",
+    "storageAccountName": "[concat('stfabricval', substring(variables('deploymentIdNoHyphens'), 0, min(12, length(variables('deploymentIdNoHyphens')))))]",
     "validationContainerName": "validation",
     "sqlServerName": "[concat('sql-cdq-', toLower(parameters('DeploymentID')))]",
     "sqlDatabaseName": "Contoso_Operations",
