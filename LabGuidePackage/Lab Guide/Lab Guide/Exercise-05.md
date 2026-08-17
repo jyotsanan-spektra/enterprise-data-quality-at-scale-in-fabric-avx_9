@@ -40,54 +40,62 @@ In this task, you will use Delta history and read-only time travel to determine 
    display(delta_table.history())
    ```
 
-6. In the history output, identify the most recent write operations and locate the version that appears to represent the simulated corruption event. Record the following values from the history grid in your working notes:
-   - the corrupted version number
-   - the last known good version number immediately before the corruption
-   - the timestamp of both events
-7. Add a second code cell and compare the current data with the earlier snapshot by using Delta time travel. Replace `GOOD_VERSION` with the version number you identified in the previous step.
+6. In the history output, scan the **operation** column for the most recent entries. Look for a `MERGE` operation near the top of the list — this is the operation type the incident simulation script uses to corrupt data. Record its version number as your **candidate corrupted version**, and record the version number immediately before it as your **candidate last-known-good version**.
+7. Confirm your candidates are correct by checking the data itself rather than relying on the operation type alone. The simulated incident sets `Revenue` to 0 for 1,000 rows, so count zero-Revenue rows at each candidate version:
 
    ```python
-   good_version = GOOD_VERSION
+   candidate_good = CANDIDATE_GOOD_VERSION
+   candidate_corrupted = CANDIDATE_CORRUPTED_VERSION
 
-   historical_df = spark.read.format("delta").option("versionAsOf", good_version).table("silver_orders")
-
-   print("Historical row count:", historical_df.count())
-   display(historical_df.limit(20))
+   for v in [candidate_good, candidate_corrupted]:
+       version_df = spark.read.format("delta").option("versionAsOf", v).table("silver_orders")
+       zero_revenue_count = version_df.filter("Revenue = 0").count()
+       print(f"Version {v}: rows with Revenue = 0 -> {zero_revenue_count}")
    ```
 
-8. Compare the current results with the historical snapshot. Confirm that the historical snapshot removes the corruption symptoms you observed in the live table.
-9. Add a third code cell and save your history investigation evidence to a JSON file on the lab VM. Update the version numbers before you run it.
+8. Confirm the candidate good version shows a low, expected zero-Revenue count and the candidate corrupted version shows a count at or near **1,000**. If neither candidate shows a spike near 1,000, check one version earlier and one version later in the history and repeat step 7 until you find the version boundary where the count jumps.
+9. Once confirmed, note the final version numbers as `GOOD_VERSION` and `CORRUPTED_VERSION` for the remaining steps in this challenge.
+10. Add a code cell and take a closer look at the confirmed historical snapshot to make sure it looks correct end-to-end, not just on the Revenue column:
 
-   ```python
-   import json
-   import os
+    ```python
+    historical_df = spark.read.format("delta").option("versionAsOf", GOOD_VERSION).table("silver_orders")
 
-   history_evidence = {
-       "tableName": "silver_orders",
-       "corruptedVersion": CORRUPTED_VERSION,
-       "lastKnownGoodVersion": GOOD_VERSION
-   }
+    print("Historical row count:", historical_df.count())
+    display(historical_df.limit(20))
+    ```
 
-   output_path = r"C:\LabFiles\validation\silver-recovery-history.json"
-   os.makedirs(os.path.dirname(output_path), exist_ok=True)
+11. Add a code cell and save your history investigation evidence to a JSON file on the lab VM. Use the confirmed version numbers from step 9.
 
-   with open(output_path, "w", encoding="utf-8") as f:
-       json.dump(history_evidence, f, indent=2)
+    ```python
+    import json
+    import os
 
-   print(f"Saved {output_path}")
-   ```
+    history_evidence = {
+        "tableName": "silver_orders",
+        "corruptedVersion": CORRUPTED_VERSION,
+        "lastKnownGoodVersion": GOOD_VERSION
+    }
+
+    output_path = r"C:\LabFiles\validation\silver-recovery-history.json"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(history_evidence, f, indent=2)
+
+    print(f"Saved {output_path}")
+    ```
 
 > [!Important]
 > Delta Lake time travel is read-only. Use it to verify the historical snapshot before you run a restore.
 
 > [!Tip]
-> Microsoft Learn recommends running `DESCRIBE HISTORY` or the DeltaTable history method before choosing a restore target. This reduces the chance of restoring the wrong version.
+> Microsoft Learn recommends running `DESCRIBE HISTORY` or the DeltaTable history method before choosing a restore target. Confirming the version against the actual data, as in step 7 above, avoids restoring to the wrong version just because its operation type looked right.
 
 ## Task 2: Restore `silver_orders` and capture recovery evidence
 
 In this task, you will restore the Silver table to the correct version and verify that the current business state is healthy again.
 
-1. In the same notebook, add a new code cell and restore the table to the last known good version. Replace `GOOD_VERSION` with the version you validated in Task 1.
+1. In the same notebook, add a new code cell and restore the table to the last known good version confirmed in Task 1.
 
    ```python
    from delta.tables import DeltaTable
@@ -110,8 +118,16 @@ In this task, you will restore the Silver table to the correct version and verif
    display(DeltaTable.forName(spark, "silver_orders").history())
    ```
 
-3. Confirm that the restore operation created a new history entry. The new entry should show that a restore occurred; it does not remove the previous corruption event from the log.
-4. If you want a direct comparison between the restored current table and the known-good version, run the following check and confirm that the difference count is 0 after the restore:
+3. Confirm the restore created a new history entry with operation `RESTORE`. This new entry does not remove the previous corruption event from the log — you should still see the earlier `MERGE` entry below it.
+4. Confirm zero remaining corruption symptoms directly:
+
+   ```python
+   post_restore_zero_revenue = restored_df.filter("Revenue = 0").count()
+   print("Rows with Revenue = 0 after restore:", post_restore_zero_revenue)
+   ```
+
+   This count should now match the low, expected baseline count you observed for the good version in Task 1 — not the ~1,000 you saw at the corrupted version.
+5. For a full row-level comparison, confirm the difference count between the restored table and the known-good version is 0:
 
    ```python
    good_version_df = spark.read.format("delta").option("versionAsOf", good_version).table("silver_orders")
@@ -120,7 +136,7 @@ In this task, you will restore the Silver table to the correct version and verif
    print("Difference count:", difference_count)
    ```
 
-5. Save the restore evidence to a second JSON file by running the following cell:
+6. Save the restore evidence to a second JSON file by running the following cell:
 
    ```python
    import json
@@ -141,7 +157,7 @@ In this task, you will restore the Silver table to the correct version and verif
    print(f"Saved {output_path}")
    ```
 
-6. Open File Explorer on the lab VM and verify that both files exist in `C:\LabFiles\validation`:
+7. Open File Explorer on the lab VM and verify that both files exist in `C:\LabFiles\validation`:
    - `silver-recovery-history.json`
    - `silver-recovery-restore.json`
 
@@ -161,11 +177,12 @@ In this task, you will create a shallow clone of the restored table and upload a
    spark.sql("CREATE TABLE silver_orders_backup SHALLOW CLONE silver_orders")
    ```
 
-2. Verify that the clone exists and is queryable.
+2. Verify that the clone exists and is queryable, and confirm its row count matches the restored table's row count from Task 2.
 
    ```python
    clone_df = spark.table("silver_orders_backup")
-   print("Clone row count:", clone_df.count())
+   clone_count = clone_df.count()
+   print("Clone row count:", clone_count)
    display(clone_df.limit(20))
    ```
 
@@ -178,7 +195,8 @@ In this task, you will create a shallow clone of the restored table and upload a
    clone_evidence = {
        "sourceTable": "silver_orders",
        "cloneTable": "silver_orders_backup",
-       "cloneType": "shallow"
+       "cloneType": "shallow",
+       "cloneRowCount": clone_count
    }
 
    output_path = r"C:\LabFiles\validation\silver-recovery-clone.json"
@@ -215,8 +233,8 @@ In this task, you will create a shallow clone of the restored table and upload a
    }
    ```
 
-6. Confirm that all three files uploaded successfully to the `validation` container.
-7. Record in your notes why a shallow clone is appropriate for short-lived recovery testing and point-in-time validation, but not for long-term archival. Because a shallow clone references the source table files, later cleanup operations such as aggressive file removal can break that dependency.
+6. Confirm all three files uploaded successfully by running `Get-AzStorageBlob -Context $ctx -Container $containerName | Select-Object Name` and checking that all three filenames appear in the output.
+7. Record in your notes why a shallow clone is appropriate for short-lived recovery testing and point-in-time validation, but not for long-term archival. Because a shallow clone references the source table's files, later cleanup operations such as aggressive file removal can break that dependency.
 
 > [!Important]
 > In Microsoft Fabric, `SHALLOW CLONE` is supported, but deep clone is not. A shallow clone is fast and storage-efficient because it references the source table's OneLake files.
