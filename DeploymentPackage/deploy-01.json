@@ -72,7 +72,7 @@
     "sqlServerName": "[concat('sql-cdq-', toLower(parameters('DeploymentID')))]",
     "sqlDatabaseName": "Contoso_Operations",
     "sqlServerFqdn": "[concat(variables('sqlServerName'), '.database.windows.net')]",
-    "bootstrapScriptUrl": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/1b9c823a9d89b29bcefb26bc282f56c8c02a9a33/DeploymentPackage/psscript-01.ps1"
+    "bootstrapScriptUrl": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/9fa8cde060d511626ab21000266f80d797f07a68/DeploymentPackage/psscript-01.ps1"
   },
   "resources": [
     {
