@@ -41,11 +41,11 @@ In this task, you will use Delta history and read-only time travel to determine 
    ```
 
 6. In the history output, scan the **operation** column for the most recent entries. Look for a `MERGE` operation near the top of the list — this is the operation type the incident simulation script uses to corrupt data. Record its version number as your **candidate corrupted version**, and record the version number immediately before it as your **candidate last-known-good version**.
-7. Confirm your candidates are correct by checking the data itself rather than relying on the operation type alone. The simulated incident sets `Revenue` to 0 for 1,000 rows, so count zero-Revenue rows at each candidate version:
+7. Confirm your candidates are correct by checking the data itself rather than relying on the operation type alone. The simulated incident sets `Revenue` to 0 for 1,000 rows, so count zero-Revenue rows at each candidate version. Replace the two values below with the actual integer version numbers you recorded in step 6 (for example, `4` and `5`) before running the cell:
 
    ```python
-   candidate_good = CANDIDATE_GOOD_VERSION
-   candidate_corrupted = CANDIDATE_CORRUPTED_VERSION
+   candidate_good = 0        # replace with your candidate last-known-good version from step 6
+   candidate_corrupted = 0   # replace with your candidate corrupted version from step 6
 
    for v in [candidate_good, candidate_corrupted]:
        version_df = spark.read.format("delta").option("versionAsOf", v).table("silver_orders")
@@ -54,7 +54,13 @@ In this task, you will use Delta history and read-only time travel to determine 
    ```
 
 8. Confirm the candidate good version shows a low, expected zero-Revenue count and the candidate corrupted version shows a count at or near **1,000**. If neither candidate shows a spike near 1,000, check one version earlier and one version later in the history and repeat step 7 until you find the version boundary where the count jumps.
-9. Once confirmed, note the final version numbers as `GOOD_VERSION` and `CORRUPTED_VERSION` for the remaining steps in this challenge.
+9. Once confirmed, add a code cell that fixes the two version numbers as plain Python variables so the rest of the notebook can reuse them without retyping the literal numbers:
+
+    ```python
+    GOOD_VERSION = candidate_good          # or the confirmed integer, if it differs from your first candidate
+    CORRUPTED_VERSION = candidate_corrupted
+    ```
+
 10. Add a code cell and take a closer look at the confirmed historical snapshot to make sure it looks correct end-to-end, not just on the Revenue column:
 
     ```python
@@ -64,7 +70,7 @@ In this task, you will use Delta history and read-only time travel to determine 
     display(historical_df.limit(20))
     ```
 
-11. Add a code cell and save your history investigation evidence to a JSON file on the lab VM. Use the confirmed version numbers from step 9.
+11. Add a code cell and save your history investigation evidence to a JSON file on the lab VM. Use the `GOOD_VERSION` and `CORRUPTED_VERSION` variables you set in step 9.
 
     ```python
     import json
@@ -164,8 +170,6 @@ In this task, you will restore the Silver table to the correct version and verif
 > [!Note]
 > Delta Lake `RESTORE` creates a new current version that points back to the selected historical state. It does not erase the history of the corruption event.
 
-<validation step="5"/>
-
 ## Task 3: Create a backup clone and upload the final validation files
 
 In this task, you will create a shallow clone of the restored table and upload all three recovery evidence files to the validation storage account.
@@ -241,6 +245,8 @@ In this task, you will create a shallow clone of the restored table and upload a
 
 > [!Tip]
 > If your team needs a durable independent backup, create a full copy by writing the data into another table instead of relying only on shallow clone.
+
+<validation step="Validate Delta Lake history investigation, restore, and backup clone evidence for silver_orders."/>
 
 ## Summary
 

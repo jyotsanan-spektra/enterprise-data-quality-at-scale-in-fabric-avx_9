@@ -31,27 +31,26 @@ In this task, you will create the pipeline canvas and add the activities that re
    - **orders-to-bronze-cdc** — the Copy job that ingests into `bronze_orders_cdc` (Challenge 2)
    - **nb_data_quality_gate** — the notebook that gates Bronze-to-Silver promotion (Challenge 4)
    - `usp_process_customer_changes` — the stored procedure in `contoso_gold_wh` that applies SCD Type 2 changes (Challenge 3, Task 3, step 11)
-5. In the workspace, select **+ New item**.
-6. Search for **Data pipeline**, select it, and create a new pipeline.
-7. Name the pipeline **contoso-medallion-orchestration**.
-8. On the pipeline canvas, add the first activity that represents the Bronze ingestion step. Add the activity type that invokes an existing Copy job item — depending on your Fabric version this appears either as a native **Copy job** activity or as an activity that references an existing item by name. Configure it to run the **orders-to-bronze-cdc** Copy job you created in Challenge 2, rather than rebuilding a new Copy data activity from scratch.
-9. Rename the first activity to **Bronze CDC ingestion**.
-10. Add a **Notebook** activity that runs your quality notebook.
-11. Rename it to **Bronze to Silver quality gate**.
-12. In the notebook activity settings, select **nb_data_quality_gate**, the notebook you created in Challenge 4.
-13. Confirm the notebook activity's Lakehouse context points to **contoso_medallion_lh** — the same Lakehouse you used earlier in the lab.
-14. Add a **Script** or **Stored procedure** activity for the downstream Gold processing.
-15. Rename it to **Gold dimension load**.
-16. Configure this activity's connection to point at **contoso_gold_wh** (using the SQL connection string you saved in Challenge 1, Task 2), and set its query or stored procedure call to:
+5. In the workspace, open the pipeline item you created in Challenge 1 (**contoso-medallion-orchestration**) rather than creating a new one.
+   - If that item does not exist yet, select **+ New item**, search for **Data pipeline**, select it, and name the new pipeline **contoso-medallion-orchestration**.
+6. On the pipeline canvas, add the first activity that represents the Bronze ingestion step. Add the activity type that invokes an existing Copy job item — depending on your Fabric version this appears either as a native **Copy job** activity or as an activity that references an existing item by name. Configure it to run the **orders-to-bronze-cdc** Copy job you created in Challenge 2, rather than rebuilding a new Copy data activity from scratch.
+7. Rename the first activity to **Bronze CDC ingestion**.
+8. Add a **Notebook** activity that runs your quality notebook.
+9. Rename it to **Bronze to Silver quality gate**.
+10. In the notebook activity settings, select **nb_data_quality_gate**, the notebook you created in Challenge 4.
+11. Confirm the notebook activity's Lakehouse context points to **contoso_medallion_lh** — the same Lakehouse you used earlier in the lab.
+12. Add a **Script** or **Stored procedure** activity for the downstream Gold processing.
+13. Rename it to **Gold dimension load**.
+14. Configure this activity's connection to point at **contoso_gold_wh** (using the SQL connection string you saved in Challenge 1, Task 2), and set its query or stored procedure call to:
 
     ```sql
     EXEC usp_process_customer_changes;
     ```
 
-17. Connect **Bronze CDC ingestion** to **Bronze to Silver quality gate** by dragging the green success dependency from the first activity to the second.
-18. Connect **Bronze to Silver quality gate** to **Gold dimension load** with a success dependency.
-19. If your design includes a separate Silver promotion step outside the notebook, insert that activity between the notebook and the Gold load, and make both downstream activities dependent on a successful quality result.
-20. Select **Save**.
+15. Connect **Bronze CDC ingestion** to **Bronze to Silver quality gate** by dragging the green success dependency from the first activity to the second.
+16. Connect **Bronze to Silver quality gate** to **Gold dimension load** with a success dependency.
+17. If your design includes a separate Silver promotion step outside the notebook, insert that activity between the notebook and the Gold load, and make both downstream activities dependent on a successful quality result.
+18. Select **Save**.
 
 > [!Important]
 > Microsoft Fabric pipelines, lakehouses, warehouses, and notebooks are Fabric control-plane items. In this lab, they are learner-created inside the workspace and are not discovered through Azure Resource Manager.

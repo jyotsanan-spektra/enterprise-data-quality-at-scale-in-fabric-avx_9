@@ -57,7 +57,8 @@ In this task, you will create the primary storage and analytical items for the m
 11. Select **Create**.
 12. Wait until the Warehouse opens successfully.
 13. In the Warehouse, note that this item will later host the Gold-layer customer dimension and SCD Type 2 logic.
-14. Return to the workspace and verify that both **contoso_medallion_lh** and **contoso_gold_wh** are now listed.
+14. Select **Settings** (or the connection icon) on the Warehouse ribbon and record both the **SQL connection string** and the **JDBC connection string** shown there. Save these values in `C:\LabFiles\fabric-item-names.txt` — later challenges reuse them to reach `contoso_gold_wh` from a notebook or pipeline activity without querying through the attached-item experience.
+15. Return to the workspace and verify that both **contoso_medallion_lh** and **contoso_gold_wh** are now listed.
 
 > [!Important]
 > Create a blank Warehouse, not a sample warehouse. You need an empty object that you will configure during later challenges.
@@ -72,11 +73,11 @@ In this task, you will create the remaining Fabric items that support Spark vali
 4. When the notebook opens, confirm that the default notebook canvas is available, and then return to the workspace.
 5. Select **+ New item**.
 6. Search for **Data pipeline**, and then select **Data pipeline**.
-7. Create a pipeline named **pl_contoso_medallion**.
+7. Create a pipeline named **contoso-medallion-orchestration**.
 8. When the pipeline canvas opens, confirm it loads successfully, and then return to the workspace.
 9. Select **+ New item** one more time.
 10. Search for **Copy job**, and then select **Copy job**.
-11. Enter **cj_orders_cdc** as the copy job name, and create the item.
+11. Enter **orders-to-bronze-cdc** as the copy job name, and create the item.
 12. When the copy job interface opens, stop before configuring the source and destination because that work is completed in the next challenge.
 13. Return to the workspace.
 14. Verify that all six learner-created Fabric items are visible in the workspace:
@@ -84,8 +85,8 @@ In this task, you will create the remaining Fabric items that support Spark vali
     - **contoso_medallion_lh**
     - **contoso_gold_wh**
     - **nb_data_quality_gate**
-    - **pl_contoso_medallion**
-    - **cj_orders_cdc**
+    - **contoso-medallion-orchestration**
+    - **orders-to-bronze-cdc**
 15. Record these exact names in your notes because you will reuse them throughout the lab.
 
 ## Task 4: Verify target-state readiness for the remaining challenges
@@ -98,8 +99,8 @@ In this task, you will map each created item to the medallion design and confirm
 4. In your notes, map the future `silver_orders` table to the Silver layer in the same Lakehouse.
 5. Open **contoso_gold_wh** and confirm that it will be used for the Gold-layer dimensional model, including the customer dimension that will track historical changes.
 6. Open **nb_data_quality_gate** and confirm that this notebook will later hold the PySpark logic that checks null handling, ranges, referential integrity, freshness, and schema expectations before Silver promotion.
-7. Open **cj_orders_cdc** and confirm that this item will later ingest data from the prepared Contoso_Operations source into the Bronze layer.
-8. Open **pl_contoso_medallion** and confirm that this pipeline will later orchestrate ingestion, quality validation, Gold loading, and success or failure branches.
+7. Open **orders-to-bronze-cdc** and confirm that this item will later ingest data from the prepared Contoso_Operations source into the Bronze layer.
+8. Open **contoso-medallion-orchestration** and confirm that this pipeline will later orchestrate ingestion, quality validation, Gold loading, and success or failure branches.
 9. Review the overall medallion flow and confirm that each major requirement from the scenario now has a matching learner-created Fabric item:
    - Workspace container for the lab solution
    - Bronze ingestion

@@ -37,20 +37,19 @@ In this task, you will return to the Fabric items you prepared in the previous c
 In this task, you will create or complete the Copy job that reads from the SQL source and writes to the Bronze table.
 
 1. Return to your Fabric workspace.
-2. Select **+ New item**.
-3. Search for **Copy job**, select it, enter **orders-to-bronze-cdc** as the name, and then select **Create**.
-   - If you already created a Copy job for this challenge, open that existing job instead of creating another one.
-4. On the **Choose data source** page, select the SQL source connection that exposes the `Contoso_Operations` database. The connection name typically references `Contoso_Operations` or `Contoso` directly — if more than one connection is listed, confirm the correct one with your environment's connection details pane before continuing.
-5. When the source objects are displayed, select the `Orders` table.
-6. Continue to the destination step and select your existing Lakehouse (**contoso_medallion_lh**) from Challenge 1.
-7. When prompted for the destination object, map the source table to the Lakehouse **Tables** area and set the destination table name to `bronze_orders_cdc`.
-8. Open the copy settings step.
-9. Set the copy mode to **Incremental copy**.
-10. In the incremental copy settings, locate the change-tracking method field and confirm it shows a CDC-based tracking method (for example, **Change Data Capture** or **Native CDC**) rather than a watermark or last-modified-column method. The source tables are CDC-enabled, so a watermark-based method here means the wrong tracking mode was selected — go back and reselect the CDC option before continuing.
-11. Review the table mapping and confirm the source still reads `Orders` and the destination still reads `bronze_orders_cdc`.
-12. Confirm the destination is still pointed at the same Lakehouse and table name you verified in Task 1.
-13. On the summary page, confirm three specific fields: the copy mode reads **Incremental (CDC)** or an equivalent CDC-aware incremental label, the source reads `Contoso_Operations.Orders`, and the destination table name reads exactly `bronze_orders_cdc`.
-14. Select **Save + Run**.
+2. Open the **orders-to-bronze-cdc** Copy job you created in Challenge 1 rather than creating a new one.
+   - If that item does not exist yet, select **+ New item**, search for **Copy job**, select it, enter **orders-to-bronze-cdc** as the name, and then select **Create**.
+3. On the **Choose data source** page, select the SQL source connection that exposes the `Contoso_Operations` database. The connection name typically references `Contoso_Operations` or `Contoso` directly — if more than one connection is listed, confirm the correct one with your environment's connection details pane before continuing.
+4. When the source objects are displayed, select the `Orders` table.
+5. Continue to the destination step and select your existing Lakehouse (**contoso_medallion_lh**) from Challenge 1.
+6. When prompted for the destination object, map the source table to the Lakehouse **Tables** area and set the destination table name to `bronze_orders_cdc`.
+7. Open the copy settings step.
+8. Set the copy mode to **Incremental copy**.
+9. In the incremental copy settings, locate the change-tracking method field and confirm it shows a CDC-based tracking method (for example, **Change Data Capture** or **Native CDC**) rather than a watermark or last-modified-column method. The source tables are CDC-enabled, so a watermark-based method here means the wrong tracking mode was selected — go back and reselect the CDC option before continuing.
+10. Review the table mapping and confirm the source still reads `Orders` and the destination still reads `bronze_orders_cdc`.
+11. Confirm the destination is still pointed at the same Lakehouse and table name you verified in Task 1.
+12. On the summary page, confirm three specific fields: the copy mode reads **Incremental (CDC)** or an equivalent CDC-aware incremental label, the source reads `Contoso_Operations.Orders`, and the destination table name reads exactly `bronze_orders_cdc`.
+13. Select **Save + Run**.
 
 > [!Note]
 > In Microsoft Fabric Copy job, incremental copy performs an initial full load on the first successful run. For CDC-enabled database sources, later runs capture inserted and updated changes since the previous successful run.
@@ -87,7 +86,6 @@ In this task, you will rerun the same job after the prepared source delta is ava
 11. Keep your evidence available for validation, including the two run outcomes and the post-run table state.
 
 <validation step="CDC ingestion outcomes"/>
-<question>
 
 ## Summary
 In this challenge, you configured a Microsoft Fabric Copy job to ingest `Contoso_Operations.Orders` into the Bronze Lakehouse table `bronze_orders_cdc`. You ran the initial load, monitored the Copy job metrics, and then reran the same ingestion path after prepared source changes were available to demonstrate CDC-driven incremental behavior in the Bronze layer.

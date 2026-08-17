@@ -177,7 +177,6 @@ In this task, you will deliberately test the gate with bad data and confirm the 
 11. Keep the Lakehouse, notebook, and logged output available for downstream verification.
 
 <validation step="Spark quality gate behavior"/>
-<question>
 
 ## Summary
 You implemented a Fabric notebook that evaluates `bronze_orders_cdc` with null, range, referential integrity, freshness, and schema checks before any Silver promotion occurs. You then wrote `silver_orders` only when the gate passed, captured quality evidence in the Lakehouse, and proved that a controlled defect prevents the Silver layer from being refreshed.
