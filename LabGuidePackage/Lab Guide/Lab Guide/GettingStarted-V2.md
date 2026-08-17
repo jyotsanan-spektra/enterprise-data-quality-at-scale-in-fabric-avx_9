@@ -49,6 +49,18 @@ Before starting Challenge 1, verify the following conditions:
 - PySpark notebook execution is available in Fabric.
 - You are prepared to validate results by inspecting row counts, Delta table history, Warehouse query output, notebook runs, and pipeline activity status.
 
+### What the sandbox has already provisioned
+
+The lab VM and Azure side of the environment are prepared for you:
+
+- **Contoso_Operations Azure SQL database** — contains `Orders` (~100,000 rows, 12 columns), `Customers` (5,000 rows), and `Products` (1,000 rows), with CDC enabled on `dbo.Orders`. Connection details are in `C:\LabFiles\.env` on the lab VM.
+- **Sample data files** under `C:\LabFiles\FabricChallengeLab\Samples` — `customers_baseline.csv` (5,000 rows), `customers_changes.csv` (200 rows), and `quality_defect.csv` (100 rows, 10 with a blank `OrderID`).
+- **Helper scripts** under `C:\LabFiles\FabricChallengeLab\Scripts` — including `Apply-OrderChanges.ps1`, which you run in Challenge 2 to generate the incremental CDC change set.
+- **A validation storage account** with a `validation` container, where you upload evidence files at the end of Challenges 2 through 6.
+
+> [!Important]
+> Fabric notebooks run on remote Spark compute, not on your lab VM. Any step that creates or uploads a validation evidence file to `C:\LabFiles\validation` must be run from a **PowerShell window on the lab VM**, using values you copy from the Fabric screens. A notebook cell cannot write to the VM's file system.
+
 > [!Note]
 > The sandbox prepares Azure-side dependencies and source prerequisites, but the Fabric implementation work remains part of the lab. Create the Fabric items carefully and keep your naming consistent so later challenges can reuse what you build.
 

@@ -4,21 +4,22 @@
 
 ## Scenario
 
-A simulated corruption event has affected the `silver_orders` Delta table in your Microsoft Fabric medallion environment. Before you move on to full orchestration, you must investigate the table history, prove which version still contains the correct business data, restore the table to that verified state, and create a backup clone that the team can use for short-lived recovery readiness.
+A bad upstream job has corrupted revenue values in the `silver_orders` Delta table in your Microsoft Fabric medallion environment. In this challenge you will first reproduce that incident in a controlled way, then investigate the table history, prove which version still contains the correct business data, restore the table to that verified state, and create a backup clone that the team can use for short-lived recovery readiness.
 
 ## Overview
 
-In this challenge, you will use a Fabric notebook to inspect Delta Lake history for `silver_orders`, compare current data with a previous snapshot by using time travel, restore the live table to the correct version, and create a shallow clone backup table. You will also upload the required recovery evidence files so the lab validation can confirm your work.
+In this challenge, you will trigger a controlled corruption event against `silver_orders`, use a Fabric notebook to inspect Delta Lake history, compare current data with a previous snapshot by using time travel, restore the live table to the correct version, and create a shallow clone backup table. You will also upload the required recovery evidence files so the lab validation can confirm your work.
 
 ## Objectives
 
-- Task 1: Review Delta history and identify the last known good Silver version
-- Task 2: Restore `silver_orders` and capture recovery evidence
-- Task 3: Create a backup clone and upload the final validation files
+- Task 1: Reproduce the controlled corruption incident
+- Task 2: Review Delta history and identify the last known good Silver version
+- Task 3: Restore `silver_orders` and capture recovery evidence
+- Task 4: Create a backup clone and upload the final validation files
 
-## Task 1: Review Delta history and identify the last known good Silver version
+## Task 1: Reproduce the controlled corruption incident
 
-In this task, you will use Delta history and read-only time travel to determine which version of `silver_orders` should be restored.
+In this task, you will simulate the upstream incident that damaged the Silver table, so that there is a real corruption event in the Delta history for you to investigate and recover from.
 
 1. Sign in to Microsoft Fabric with the lab credentials.
    - Username: <inject key="AzureAdUserEmail"></inject>
@@ -26,7 +27,44 @@ In this task, you will use Delta history and read-only time travel to determine 
 2. Confirm that you are working in the lab environment associated with **Deployment ID: <inject key="DeploymentID" enableCopy="false"/>**.
 3. Open the Fabric workspace you used in the previous challenges, and then open the Lakehouse that contains the `silver_orders` table.
 4. From the Lakehouse, open a notebook that is attached to the same Lakehouse. If you do not already have a notebook for Silver-layer operations, create a new notebook named `silver_recovery_investigation`.
-5. Add a new code cell and run the following PySpark statements to inspect the current table and its Delta history:
+5. Confirm the table is currently healthy before you damage it. Run the following cell and note the row count and the zero-Revenue count, which should be **0**:
+
+   ```python
+   healthy_count = spark.table("silver_orders").count()
+   healthy_zero_revenue = spark.table("silver_orders").filter("Revenue = 0").count()
+   print("Row count:", healthy_count)
+   print("Rows with Revenue = 0 before the incident:", healthy_zero_revenue)
+   ```
+
+   > [!Note]
+   > If `silver_orders` does not exist, go back and complete Challenge 4, Task 2 — the quality gate must write the Silver table before you can recover it here.
+
+6. Run the following cell to simulate the faulty upstream job. It performs a Delta `MERGE` that zeroes out `Revenue` for exactly 1,000 orders, which is the incident you will investigate and undo:
+
+   ```python
+   spark.sql("""
+       MERGE INTO silver_orders AS t
+       USING (SELECT explode(sequence(1, 1000)) AS OrderID) AS s
+       ON t.OrderID = s.OrderID
+       WHEN MATCHED THEN UPDATE SET t.Revenue = 0
+   """)
+   ```
+
+7. Confirm the damage landed as expected. The zero-Revenue count should now be **1000**, and the total row count should be unchanged from step 5:
+
+   ```python
+   print("Rows with Revenue = 0 after the incident:", spark.table("silver_orders").filter("Revenue = 0").count())
+   print("Row count after the incident:", spark.table("silver_orders").count())
+   ```
+
+> [!Important]
+> The `MERGE` you just ran is recorded as its own version in the Delta transaction log. That is what makes the recovery workflow in the next tasks possible — the previous, healthy version is still retained and readable.
+
+## Task 2: Review Delta history and identify the last known good Silver version
+
+In this task, you will use Delta history and read-only time travel to determine which version of `silver_orders` should be restored.
+
+1. In the same notebook, add a new code cell and run the following PySpark statements to inspect the current table and its Delta history:
 
    ```python
    from delta.tables import DeltaTable
@@ -40,12 +78,12 @@ In this task, you will use Delta history and read-only time travel to determine 
    display(delta_table.history())
    ```
 
-6. In the history output, scan the **operation** column for the most recent entries. Look for a `MERGE` operation near the top of the list — this is the operation type the incident simulation script uses to corrupt data. Record its version number as your **candidate corrupted version**, and record the version number immediately before it as your **candidate last-known-good version**.
-7. Confirm your candidates are correct by checking the data itself rather than relying on the operation type alone. The simulated incident sets `Revenue` to 0 for 1,000 rows, so count zero-Revenue rows at each candidate version. Replace the two values below with the actual integer version numbers you recorded in step 6 (for example, `4` and `5`) before running the cell:
+2. In the history output, scan the **operation** column for the most recent entries. Look for a `MERGE` operation near the top of the list — this is the operation type the incident simulation script uses to corrupt data. Record its version number as your **candidate corrupted version**, and record the version number immediately before it as your **candidate last-known-good version**.
+3. Confirm your candidates are correct by checking the data itself rather than relying on the operation type alone. The simulated incident sets `Revenue` to 0 for 1,000 rows, so count zero-Revenue rows at each candidate version. Replace the two values below with the actual integer version numbers you recorded in step 2 (for example, `4` and `5`) before running the cell:
 
    ```python
-   candidate_good = 0        # replace with your candidate last-known-good version from step 6
-   candidate_corrupted = 0   # replace with your candidate corrupted version from step 6
+   candidate_good = 0        # replace with your candidate last-known-good version from step 2
+   candidate_corrupted = 0   # replace with your candidate corrupted version from step 2
 
    for v in [candidate_good, candidate_corrupted]:
        version_df = spark.read.format("delta").option("versionAsOf", v).table("silver_orders")
@@ -53,15 +91,15 @@ In this task, you will use Delta history and read-only time travel to determine 
        print(f"Version {v}: rows with Revenue = 0 -> {zero_revenue_count}")
    ```
 
-8. Confirm the candidate good version shows a low, expected zero-Revenue count and the candidate corrupted version shows a count at or near **1,000**. If neither candidate shows a spike near 1,000, check one version earlier and one version later in the history and repeat step 7 until you find the version boundary where the count jumps.
-9. Once confirmed, add a code cell that fixes the two version numbers as plain Python variables so the rest of the notebook can reuse them without retyping the literal numbers:
+4. Confirm the candidate good version shows a low, expected zero-Revenue count and the candidate corrupted version shows a count at or near **1,000**. If neither candidate shows a spike near 1,000, check one version earlier and one version later in the history and repeat step 3 until you find the version boundary where the count jumps.
+5. Once confirmed, add a code cell that fixes the two version numbers as plain Python variables so the rest of the notebook can reuse them without retyping the literal numbers:
 
     ```python
     GOOD_VERSION = candidate_good          # or the confirmed integer, if it differs from your first candidate
     CORRUPTED_VERSION = candidate_corrupted
     ```
 
-10. Add a code cell and take a closer look at the confirmed historical snapshot to make sure it looks correct end-to-end, not just on the Revenue column:
+6. Add a code cell and take a closer look at the confirmed historical snapshot to make sure it looks correct end-to-end, not just on the Revenue column:
 
     ```python
     historical_df = spark.read.format("delta").option("versionAsOf", GOOD_VERSION).table("silver_orders")
@@ -70,38 +108,29 @@ In this task, you will use Delta history and read-only time travel to determine 
     display(historical_df.limit(20))
     ```
 
-11. Add a code cell and save your history investigation evidence to a JSON file on the lab VM. Use the `GOOD_VERSION` and `CORRUPTED_VERSION` variables you set in step 9.
+7. Print the two confirmed version numbers so you can copy them onto the lab VM in Task 4:
 
     ```python
-    import json
-    import os
-
-    history_evidence = {
-        "tableName": "silver_orders",
-        "corruptedVersion": CORRUPTED_VERSION,
-        "lastKnownGoodVersion": GOOD_VERSION
-    }
-
-    output_path = r"C:\LabFiles\validation\silver-recovery-history.json"
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(history_evidence, f, indent=2)
-
-    print(f"Saved {output_path}")
+    print("CORRUPTED_VERSION =", CORRUPTED_VERSION)
+    print("GOOD_VERSION      =", GOOD_VERSION)
     ```
+
+    Write both numbers down. You will type them into a PowerShell command on the lab VM later.
+
+    > [!Important]
+    > Fabric notebooks run on remote Spark compute, not on your lab VM. A notebook cell cannot write a file to `C:\LabFiles`, so all validation evidence files in this challenge are created on the VM in Task 4 using the values you record here.
 
 > [!Important]
 > Delta Lake time travel is read-only. Use it to verify the historical snapshot before you run a restore.
 
 > [!Tip]
-> Microsoft Learn recommends running `DESCRIBE HISTORY` or the DeltaTable history method before choosing a restore target. Confirming the version against the actual data, as in step 7 above, avoids restoring to the wrong version just because its operation type looked right.
+> Microsoft Learn recommends running `DESCRIBE HISTORY` or the DeltaTable history method before choosing a restore target. Confirming the version against the actual data, as in step 3 above, avoids restoring to the wrong version just because its operation type looked right.
 
-## Task 2: Restore `silver_orders` and capture recovery evidence
+## Task 3: Restore `silver_orders` and capture recovery evidence
 
 In this task, you will restore the Silver table to the correct version and verify that the current business state is healthy again.
 
-1. In the same notebook, add a new code cell and restore the table to the last known good version confirmed in Task 1.
+1. In the same notebook, add a new code cell and restore the table to the last known good version confirmed in Task 2.
 
    ```python
    from delta.tables import DeltaTable
@@ -132,7 +161,7 @@ In this task, you will restore the Silver table to the correct version and verif
    print("Rows with Revenue = 0 after restore:", post_restore_zero_revenue)
    ```
 
-   This count should now match the low, expected baseline count you observed for the good version in Task 1 — not the ~1,000 you saw at the corrupted version.
+   This count should now match the low, expected baseline count you observed for the good version in Task 2 — not the ~1,000 you saw at the corrupted version.
 5. For a full row-level comparison, confirm the difference count between the restored table and the known-good version is 0:
 
    ```python
@@ -142,35 +171,19 @@ In this task, you will restore the Silver table to the correct version and verif
    print("Difference count:", difference_count)
    ```
 
-6. Save the restore evidence to a second JSON file by running the following cell:
+6. Print the restore results so you can record them for the evidence files you create in Task 4:
 
    ```python
-   import json
-   import os
-
-   restore_evidence = {
-       "tableName": "silver_orders",
-       "restoredToVersion": good_version,
-       "restoredRowCount": restored_count
-   }
-
-   output_path = r"C:\LabFiles\validation\silver-recovery-restore.json"
-   os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-   with open(output_path, "w", encoding="utf-8") as f:
-       json.dump(restore_evidence, f, indent=2)
-
-   print(f"Saved {output_path}")
+   print("restoredToVersion =", good_version)
+   print("restoredRowCount  =", restored_count)
    ```
 
-7. Open File Explorer on the lab VM and verify that both files exist in `C:\LabFiles\validation`:
-   - `silver-recovery-history.json`
-   - `silver-recovery-restore.json`
+   Write both values down alongside the version numbers you recorded in Task 2.
 
 > [!Note]
 > Delta Lake `RESTORE` creates a new current version that points back to the selected historical state. It does not erase the history of the corruption event.
 
-## Task 3: Create a backup clone and upload the final validation files
+## Task 4: Create a backup clone and upload the final validation files
 
 In this task, you will create a shallow clone of the restored table and upload all three recovery evidence files to the validation storage account.
 
@@ -181,7 +194,7 @@ In this task, you will create a shallow clone of the restored table and upload a
    spark.sql("CREATE TABLE silver_orders_backup SHALLOW CLONE silver_orders")
    ```
 
-2. Verify that the clone exists and is queryable, and confirm its row count matches the restored table's row count from Task 2.
+2. Verify that the clone exists and is queryable, and confirm its row count matches the restored table's row count from Task 3.
 
    ```python
    clone_df = spark.table("silver_orders_backup")
@@ -190,54 +203,68 @@ In this task, you will create a shallow clone of the restored table and upload a
    display(clone_df.limit(20))
    ```
 
-3. Save the clone evidence to a third JSON file by running the following cell:
+3. Print the clone row count so you can record it with your other evidence values:
 
    ```python
-   import json
-   import os
-
-   clone_evidence = {
-       "sourceTable": "silver_orders",
-       "cloneTable": "silver_orders_backup",
-       "cloneType": "shallow",
-       "cloneRowCount": clone_count
-   }
-
-   output_path = r"C:\LabFiles\validation\silver-recovery-clone.json"
-   os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-   with open(output_path, "w", encoding="utf-8") as f:
-       json.dump(clone_evidence, f, indent=2)
-
-   print(f"Saved {output_path}")
+   print("cloneRowCount =", clone_count)
    ```
 
-4. Note the values you will use in PowerShell for the upload step:
-   - Deployment ID: <inject key="DeploymentID" enableCopy="false"/>
-   - Resource group: `rg-fabricdataquality-<your deployment id>`
-   - Storage account: `stfabricval<deployment id without hyphens, first 12 characters>`
-   - Container: `validation`
-5. On the lab VM, open PowerShell and upload the three evidence files to the validation storage account by running the following script. Before you run it, replace `YOUR-DEPLOYMENT-ID` and `YOUR-STORAGE-ACCOUNT-NAME` with the values from the previous step.
+4. On the lab VM, open PowerShell. Fill in the four values below with the numbers you recorded in Tasks 2, 3, and 4, then run the block to create all three evidence files at once:
 
    ```powershell
-   $deploymentId = "YOUR-DEPLOYMENT-ID"
-   $resourceGroup = "rg-fabricdataquality-$deploymentId"
-   $storageAccountName = "YOUR-STORAGE-ACCOUNT-NAME"
-   $containerName = "validation"
-   $localFolder = "C:\LabFiles\validation"
+   $corruptedVersion = 5        # Task 2, step 7
+   $goodVersion      = 4        # Task 2, step 7
+   $restoredRowCount = 100500   # Task 3, step 6
+   $cloneRowCount    = 100500   # Task 4, step 3
 
-   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $storageAccountName).Context
+   New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
+
+   [ordered]@{
+       tableName            = 'silver_orders'
+       corruptedVersion     = $corruptedVersion
+       lastKnownGoodVersion = $goodVersion
+   } | ConvertTo-Json | Set-Content 'C:\LabFiles\validation\silver-recovery-history.json' -Encoding utf8
+
+   [ordered]@{
+       tableName         = 'silver_orders'
+       restoredToVersion = $goodVersion
+       restoredRowCount  = $restoredRowCount
+   } | ConvertTo-Json | Set-Content 'C:\LabFiles\validation\silver-recovery-restore.json' -Encoding utf8
+
+   [ordered]@{
+       sourceTable   = 'silver_orders'
+       cloneTable    = 'silver_orders_backup'
+       cloneType     = 'shallow'
+       cloneRowCount = $cloneRowCount
+   } | ConvertTo-Json | Set-Content 'C:\LabFiles\validation\silver-recovery-clone.json' -Encoding utf8
+
+   Get-ChildItem 'C:\LabFiles\validation'
+   ```
+
+5. Upload all three evidence files to the validation storage account:
+
+   ```powershell
+   $envMap = @{}
+   Get-Content 'C:\LabFiles\.env' | ForEach-Object {
+       if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
+   }
+
+   if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
+
+   $resourceGroup = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
+   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $envMap['VALIDATION_STORAGE_ACCOUNT']).Context
 
    @(
-       "silver-recovery-history.json",
-       "silver-recovery-restore.json",
-       "silver-recovery-clone.json"
+       'silver-recovery-history.json',
+       'silver-recovery-restore.json',
+       'silver-recovery-clone.json'
    ) | ForEach-Object {
-       Set-AzStorageBlobContent -Context $ctx -Container $containerName -File (Join-Path $localFolder $_) -Blob $_ -Force | Out-Null
+       Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+           -File (Join-Path 'C:\LabFiles\validation' $_) -Blob $_ -Force | Out-Null
    }
    ```
 
-6. Confirm all three files uploaded successfully by running `Get-AzStorageBlob -Context $ctx -Container $containerName | Select-Object Name` and checking that all three filenames appear in the output.
+6. Confirm all three files uploaded successfully by running `Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name` and checking that all three filenames appear in the output.
 7. Record in your notes why a shallow clone is appropriate for short-lived recovery testing and point-in-time validation, but not for long-term archival. Because a shallow clone references the source table's files, later cleanup operations such as aggressive file removal can break that dependency.
 
 > [!Important]
@@ -250,4 +277,4 @@ In this task, you will create a shallow clone of the restored table and upload a
 
 ## Summary
 
-In this challenge, you inspected Delta history for `silver_orders`, used time travel to verify the last known good snapshot, restored the current table to that version, created a `silver_orders_backup` shallow clone, and uploaded the required recovery evidence files for validation. These steps establish the Silver-layer recovery controls that you will rely on before validating the end-to-end pipeline in the final challenge.
+In this challenge, you reproduced a controlled corruption event against `silver_orders`, inspected the resulting Delta history, used time travel to verify the last known good snapshot, restored the current table to that version, created a `silver_orders_backup` shallow clone, and uploaded the required recovery evidence files for validation. These steps establish the Silver-layer recovery controls that you will rely on before validating the end-to-end pipeline in the final challenge.

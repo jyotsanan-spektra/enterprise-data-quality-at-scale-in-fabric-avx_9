@@ -25,6 +25,12 @@
     },
     "trainerUserPassword": {
       "value": "GEN-PASSWORD"
+    },
+    "sqlAdminUsername": {
+      "value": "cdqadmin"
+    },
+    "sqlAdminPassword": {
+      "value": "GEN-PASSWORD"
     }
   }
 }

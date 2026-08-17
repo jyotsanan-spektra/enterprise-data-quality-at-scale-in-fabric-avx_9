@@ -15,6 +15,7 @@ You will open or create a Fabric notebook, attach it to your Lakehouse, and impl
 - Task 1: Prepare the Lakehouse and notebook context for the quality gate
 - Task 2: Implement and run the PySpark quality checks
 - Task 3: Trigger the failure path and confirm Silver promotion is blocked
+- Task 4: Upload your quality gate evidence for validation
 
 ## Task 1: Prepare the Lakehouse and notebook context for the quality gate
 
@@ -26,7 +27,7 @@ In this task, you will return to your learner-created Fabric items and prepare t
 4. Open the Lakehouse you created or confirmed in Challenge 1 (**contoso_medallion_lh**).
 5. In the **Tables** pane, confirm that the Bronze table `bronze_orders_cdc` exists and shows approximately 100,500 rows (the baseline plus incremental rows from Challenge 2).
 6. Confirm whether `silver_orders` already exists. If it does, keep it as the target curated table for this challenge. If it doesn't exist yet, you will create it from the notebook only after the quality checks pass.
-7. From the Lakehouse page, select **Open notebook**, then **New notebook**, and rename it **nb_data_quality_gate** (or reuse the item you created with this name in Challenge 1).
+7. From the Lakehouse page, select **Open notebook**, then select **Existing notebook** and choose **nb_data_quality_gate** (the notebook you created in Challenge 1) to open it. If it does not appear in the list, select **New notebook** instead and rename the new notebook to **nb_data_quality_gate**.
 8. If more than one Lakehouse is attached to the notebook, make sure **contoso_medallion_lh** is pinned as the default Lakehouse before you run Spark SQL or use relative table paths.
 9. In the first notebook cell, confirm you can query `bronze_orders_cdc` and review its columns:
 
@@ -78,11 +79,19 @@ In this task, you will build the step-by-step validation logic that determines w
                     "failedRowCount": out_of_range_count, "message": "Revenue outside 0-1,000,000"})
    ```
 
-4. **Referential integrity check** — every `CustomerID` in Orders must exist in the customer dimension, failing if the orphan rate exceeds 0.5%. Attach `contoso_gold_wh` to the notebook first (**Explorer > Add data items > Warehouse**) if your workspace supports querying a Warehouse table directly from Spark SQL; otherwise, use the JDBC connection string you saved in Challenge 1, Task 2.
+4. **Referential integrity check** — every `CustomerID` in Orders must exist in the customer dimension, failing if the orphan rate exceeds 0.5%.
+   - **Preferred:** Attach `contoso_gold_wh` to the notebook first (**Explorer > Add data items > Warehouse**) if your workspace supports querying a Warehouse table directly from Spark SQL, then use the first line below.
+   - **Fallback:** If you cannot attach the Warehouse, use the second line below instead, replacing `<JDBC_CONNECTION_STRING>` with the JDBC connection string you recorded in Challenge 1, Task 2.
 
    ```python
-   # If contoso_gold_wh is attached directly to the notebook:
+   # Preferred, if contoso_gold_wh is attached directly to the notebook:
    customer_ids_df = spark.sql("SELECT DISTINCT CustomerID FROM contoso_gold_wh.dbo.dim_customer")
+
+   # Fallback, if the Warehouse is not attached:
+   # customer_ids_df = spark.read.format("jdbc") \
+   #     .option("url", "<JDBC_CONNECTION_STRING>") \
+   #     .option("query", "SELECT DISTINCT CustomerID FROM dim_customer") \
+   #     .load()
 
    orphan_count = bronze_df.join(customer_ids_df, "CustomerID", "left_anti").count()
    orphan_rate = orphan_count / total_rows
@@ -175,6 +184,52 @@ In this task, you will deliberately test the gate with bad data and confirm the 
 9. If you are also preparing for Challenge 6, confirm the `raise Exception(...)` statement in Task 2, step 10 executes and stops the notebook when the gate fails — this is what the pipeline's retry and failure-branch logic in Challenge 6 depends on to detect the failure.
 10. Save the notebook after both the pass run (Task 2) and the fail run (this task) are complete.
 11. Keep the Lakehouse, notebook, and logged output available for downstream verification.
+
+## Task 4: Upload your quality gate evidence for validation
+
+In this task, you will record both gate outcomes into an evidence file and upload it for automated validation.
+
+> [!Important]
+> Run these commands from a **PowerShell window on the lab VM**, not from a notebook cell. You are typing in the values you observed in the notebook output.
+
+1. On the lab VM, open PowerShell.
+2. Fill in the values below from your two notebook runs, then run the block. `silverRowCountAfterPassRun` and `silverRowCountAfterFailRun` must be equal — that is the proof that the failed gate did not overwrite Silver:
+
+   ```powershell
+   $evidence = [ordered]@{
+       silverTableName            = 'silver_orders'
+       passRunOverallStatus       = 'Passed'       # Task 2, step 8
+       failRunOverallStatus       = 'Failed'       # Task 3, step 5
+       failRunFailedRule          = 'null_check'   # Task 3, step 6
+       silverRowCountAfterPassRun = 100500         # Task 2, step 13
+       silverRowCountAfterFailRun = 100500         # Task 3, step 8 - must match the line above
+   }
+
+   New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
+   $evidence | ConvertTo-Json | Set-Content -Path 'C:\LabFiles\validation\quality-gate.json' -Encoding utf8
+   Get-Content 'C:\LabFiles\validation\quality-gate.json'
+   ```
+
+3. Upload the file using the same pattern as the previous challenges:
+
+   ```powershell
+   $envMap = @{}
+   Get-Content 'C:\LabFiles\.env' | ForEach-Object {
+       if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
+   }
+
+   if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
+
+   $resourceGroup = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
+   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $envMap['VALIDATION_STORAGE_ACCOUNT']).Context
+
+   Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+       -File 'C:\LabFiles\validation\quality-gate.json' -Blob 'quality-gate.json' -Force | Out-Null
+
+   Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name
+   ```
+
+4. Confirm that `quality-gate.json` appears in the output.
 
 <validation step="Spark quality gate behavior"/>
 

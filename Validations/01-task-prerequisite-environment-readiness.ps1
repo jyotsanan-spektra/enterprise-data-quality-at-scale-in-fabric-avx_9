@@ -1,7 +1,7 @@
 using namespace System.Net
 
 # Note: $sub (subscription id) and $DID (deployment id) are injected by the platform.
-$rg = "rg-fabric-$DID"
+$rg = "rg-fabricdataquality-$DID"
 $count = 0
 $found = $false
 

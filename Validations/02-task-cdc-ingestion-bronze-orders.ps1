@@ -1,27 +1,46 @@
 using namespace System.Net
 
 # Note: $sub (subscription id) and $DID (deployment id) are injected by the platform.
-$rg = "rg-fabric-$DID"
+$rg = "rg-fabricdataquality-$DID"
 $count = 0
 $found = $false
 
-function Get-FabricAccessToken {
-    $token = Get-AzAccessToken -ResourceUrl "https://api.fabric.microsoft.com" -ErrorAction Stop
-    if (-not $token.Token) {
-        throw "Unable to acquire Microsoft Fabric access token."
+function Get-ValidationStorageAccount {
+    $expectedName = "stfabricval" + $DID.Replace('-', '').ToLower()
+    if ($expectedName.Length -gt 23) {
+        $expectedName = $expectedName.Substring(0, 23)
     }
-    return $token.Token
+
+    $storage = Get-AzStorageAccount -ResourceGroupName $rg -Name $expectedName -ErrorAction SilentlyContinue
+    if (-not $storage) {
+        $storage = Get-AzStorageAccount -ResourceGroupName $rg -ErrorAction SilentlyContinue |
+            Where-Object { $_.StorageAccountName -like 'stfabricval*' } |
+            Select-Object -First 1
+    }
+
+    return $storage
 }
 
-function Invoke-FabricGet {
+function Get-ValidationBlobContent {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Uri,
+        $StorageAccount,
+
         [Parameter(Mandatory = $true)]
-        [string]$AccessToken
+        [string]$BlobName
     )
 
-    return Invoke-RestMethod -Method Get -Uri $Uri -Headers @{ Authorization = "Bearer $AccessToken" } -ErrorAction Stop
+    $ctx = $StorageAccount.Context
+    $blob = Get-AzStorageBlob -Context $ctx -Container 'validation' -Blob $BlobName -ErrorAction SilentlyContinue
+    if (-not $blob) {
+        return $null
+    }
+
+    $tempFile = Join-Path -Path $env:TEMP -ChildPath ([System.Guid]::NewGuid().ToString() + '.json')
+    Get-AzStorageBlobContent -Context $ctx -Container 'validation' -Blob $BlobName -Destination $tempFile -Force -ErrorAction Stop | Out-Null
+    $content = Get-Content -Path $tempFile -Raw -ErrorAction Stop
+    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+    return $content
 }
 
 do {
@@ -29,97 +48,63 @@ do {
     try {
         Set-AzContext -Subscription $sub -ErrorAction Stop
 
-        $storageAccount = Get-AzStorageAccount -ResourceGroupName $rg -ErrorAction Stop |
-            Where-Object { $_.StorageAccountName -like 'fabricval*' -or $_.StorageAccountName -like 'clfabric*' } |
-            Select-Object -First 1
-
-        if (-not $storageAccount) {
-            $storageAccount = Get-AzStorageAccount -ResourceGroupName $rg -ErrorAction Stop | Select-Object -First 1
+        $storage = Get-ValidationStorageAccount
+        if (-not $storage) {
+            throw "No validation storage account starting with 'stfabricval' was found in resource group '$rg'."
         }
 
-        if (-not $storageAccount) {
-            throw "No storage account was found in resource group '$rg' for validation evidence lookup."
-        }
+        $content = Get-ValidationBlobContent -StorageAccount $storage -BlobName 'cdc-ingestion.json'
 
-        $ctx = $storageAccount.Context
-        $containerName = "fabric-validation"
-        $blobName = "cdc-validation.json"
-        $blob = Get-AzStorageBlob -Container $containerName -Blob $blobName -Context $ctx -ErrorAction SilentlyContinue
-
-        if (-not $blob) {
+        if (-not $content) {
             $message = @{
                 Status  = "Failed"
-                Message = "Validation evidence blob '$blobName' was not found in container '$containerName' in storage account '$($storageAccount.StorageAccountName)'."
+                Message = "Validation evidence blob 'cdc-ingestion.json' was not found in container 'validation' in storage account '$($storage.StorageAccountName)'. Complete Challenge 2 and upload the evidence file described in Task 4."
             } | ConvertTo-Json
         }
         else {
-            $tempFile = Join-Path $env:TEMP ("cdc-validation-{0}.json" -f [guid]::NewGuid().ToString())
-            Get-AzStorageBlobContent -Container $containerName -Blob $blobName -Destination $tempFile -Context $ctx -Force -ErrorAction Stop | Out-Null
-            $evidence = Get-Content -Path $tempFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-            Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+            $evidence = $content | ConvertFrom-Json -ErrorAction Stop
 
-            $workspaceId = [string]$evidence.workspaceId
-            $lakehouseId = [string]$evidence.lakehouseId
             $tableName = [string]$evidence.tableName
             $baselineRowCount = [int]$evidence.baselineRowCount
             $postIncrementalRowCount = [int]$evidence.postIncrementalRowCount
-            $incrementalRowsCaptured = [int]$evidence.incrementalRowsCaptured
+            $incrementalRowsWritten = [int]$evidence.incrementalRowsWritten
+            $copyMode = [string]$evidence.copyMode
 
-            if ([string]::IsNullOrWhiteSpace($workspaceId) -or [string]::IsNullOrWhiteSpace($lakehouseId) -or [string]::IsNullOrWhiteSpace($tableName)) {
-                throw "Validation evidence is missing workspaceId, lakehouseId, or tableName."
-            }
-
-            $fabricToken = Get-FabricAccessToken
-            $tablesResponse = Invoke-FabricGet -Uri ("https://api.fabric.microsoft.com/v1/workspaces/{0}/lakehouses/{1}/tables" -f $workspaceId, $lakehouseId) -AccessToken $fabricToken
-            $table = $tablesResponse.data | Where-Object { $_.name -eq $tableName }
-
-            if (-not $table) {
+            if ($tableName -ne 'bronze_orders_cdc') {
                 $message = @{
                     Status  = "Failed"
-                    Message = "Lakehouse table '$tableName' was not found in Fabric lakehouse '$lakehouseId' for workspace '$workspaceId'."
+                    Message = "Evidence reports tableName '$tableName', but the required Bronze CDC table is 'bronze_orders_cdc'."
                 } | ConvertTo-Json
             }
-            elseif ($table.format -ne 'delta') {
+            elseif ($copyMode -notmatch 'incremental|cdc') {
                 $message = @{
                     Status  = "Failed"
-                    Message = "Lakehouse table '$tableName' exists, but its format is '$($table.format)' instead of 'delta'."
+                    Message = "Evidence reports copyMode '$copyMode'. The Copy job must use a CDC-aware incremental copy mode, not a full copy."
                 } | ConvertTo-Json
             }
-            elseif ($tableName -ne 'bronze_orders_cdc') {
+            elseif ($baselineRowCount -lt 90000) {
                 $message = @{
                     Status  = "Failed"
-                    Message = "Validation evidence points to table '$tableName', but the required Bronze CDC table is 'bronze_orders_cdc'."
-                } | ConvertTo-Json
-            }
-            elseif ($baselineRowCount -le 0) {
-                $message = @{
-                    Status  = "Failed"
-                    Message = "Evidence for 'bronze_orders_cdc' shows a nonpositive baseline row count of $baselineRowCount."
+                    Message = "Evidence reports a baseline row count of $baselineRowCount for 'bronze_orders_cdc'. The prepared Orders source contains approximately 100,000 rows, so the baseline load does not look complete."
                 } | ConvertTo-Json
             }
             elseif ($postIncrementalRowCount -le $baselineRowCount) {
                 $message = @{
                     Status  = "Failed"
-                    Message = "Evidence for 'bronze_orders_cdc' does not prove incremental CDC ingestion. Baseline rows: $baselineRowCount. Post-incremental rows: $postIncrementalRowCount."
+                    Message = "Evidence does not prove incremental CDC ingestion. Baseline rows: $baselineRowCount. Post-incremental rows: $postIncrementalRowCount. The second Copy job run should have added rows."
                 } | ConvertTo-Json
             }
-            elseif ($incrementalRowsCaptured -le 0) {
+            elseif ($incrementalRowsWritten -le 0 -or $incrementalRowsWritten -ge $baselineRowCount) {
                 $message = @{
                     Status  = "Failed"
-                    Message = "Evidence for 'bronze_orders_cdc' reports incrementalRowsCaptured=$incrementalRowsCaptured, which does not prove row-change capture."
-                } | ConvertTo-Json
-            }
-            elseif (($postIncrementalRowCount - $baselineRowCount) -lt $incrementalRowsCaptured) {
-                $message = @{
-                    Status  = "Failed"
-                    Message = "Evidence for 'bronze_orders_cdc' is inconsistent. Baseline rows: $baselineRowCount, post-incremental rows: $postIncrementalRowCount, incrementalRowsCaptured: $incrementalRowsCaptured."
+                    Message = "Evidence reports incrementalRowsWritten=$incrementalRowsWritten against a baseline of $baselineRowCount. An incremental CDC run should write a small change set (approximately 500 rows), not zero and not a full reload."
                 } | ConvertTo-Json
             }
             else {
                 $found = $true
                 $message = @{
                     Status  = "Succeeded"
-                    Message = "Fabric lakehouse table 'bronze_orders_cdc' exists in workspace '$workspaceId' and lakehouse '$lakehouseId' as a Delta table. Validation evidence proves CDC ingestion with baseline rows $baselineRowCount, post-incremental rows $postIncrementalRowCount, and incremental rows captured $incrementalRowsCaptured."
+                    Message = "CDC ingestion validated for 'bronze_orders_cdc' in storage account '$($storage.StorageAccountName)'. Copy mode '$copyMode' produced a baseline of $baselineRowCount rows, then captured $incrementalRowsWritten incremental rows for a post-incremental total of $postIncrementalRowCount."
                 } | ConvertTo-Json
             }
         }

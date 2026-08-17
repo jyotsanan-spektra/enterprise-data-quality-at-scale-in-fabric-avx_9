@@ -13,6 +13,7 @@ In this challenge, you will open the same Fabric workspace and Lakehouse you pre
 - Task 2: Create and configure the Copy job for CDC-based ingestion
 - Task 3: Run the baseline load and verify `bronze_orders_cdc`
 - Task 4: Process the prepared changes and prove incremental behavior
+- Task 5: Upload your CDC evidence for validation
 
 ## Task 1: Open the Fabric workspace and confirm the Bronze destination
 In this task, you will return to the Fabric items you prepared in the previous challenge and confirm the destination that will receive the CDC data.
@@ -72,7 +73,13 @@ In this task, you will monitor the first run and confirm that the Bronze table c
 ## Task 4: Process the prepared changes and prove incremental behavior
 In this task, you will rerun the same job after the prepared source delta is available and confirm that only changes are processed.
 
-1. Apply or trigger the prepared source-side update set for `Contoso_Operations.Orders` that is provided in the lab environment. This update set introduces approximately 500 changed or new order rows. Check your lab's Getting Started guide or the `C:\LabFiles` folder on the VM for the exact script or tool name provided in this deployment.
+1. Apply the prepared source-side update set for `Contoso_Operations.Orders`. On the lab VM, open a PowerShell window and run:
+
+   ```powershell
+   & 'C:\LabFiles\FabricChallengeLab\Scripts\Apply-OrderChanges.ps1'
+   ```
+
+   This inserts approximately 350 new order rows and updates approximately 150 existing rows, for a change set of about 500 rows. Run it only once, and only after the baseline Copy job run in Task 3 has already succeeded.
    - Do not create a new source table or a second destination table.
 2. Return to the existing Copy job `orders-to-bronze-cdc`.
 3. Select **Run** to execute the same Copy job again.
@@ -84,6 +91,56 @@ In this task, you will rerun the same job after the prepared source delta is ava
 9. Run `SELECT COUNT(*) FROM bronze_orders_cdc;` again and confirm the new total is approximately 100,500 — the original ~100,000 rows plus the ~500 incremental rows.
 10. Compare the first-run evidence and second-run evidence in your notes. Your proof should show that the baseline run established the initial snapshot of ~100,000 rows and the second run added only the ~500 changed rows captured after the first successful run.
 11. Keep your evidence available for validation, including the two run outcomes and the post-run table state.
+
+## Task 5: Upload your CDC evidence for validation
+
+In this task, you will record the numbers you just observed in Fabric into an evidence file and upload it, so the lab's automated validation can confirm your work.
+
+> [!Important]
+> Run every command in this task from a **PowerShell window on the lab VM**, not from a Fabric notebook cell. Fabric notebooks execute on remote Spark compute and cannot write to this VM's `C:\LabFiles` folder. You are typing in the values you read off the Fabric screens.
+
+1. On the lab VM, open PowerShell.
+2. Fill in the four values below with the numbers you recorded in Tasks 3 and 4, then run the block to create the evidence file:
+
+   ```powershell
+   $evidence = [ordered]@{
+       tableName               = 'bronze_orders_cdc'
+       copyMode                = 'Incremental (CDC)'
+       baselineRowCount        = 100000   # Task 3: row count after the first run
+       postIncrementalRowCount = 100500   # Task 4, step 9: row count after the second run
+       incrementalRowsWritten  = 500      # Task 4, step 6: Rows written on the second run
+   }
+
+   New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
+   $evidence | ConvertTo-Json | Set-Content -Path 'C:\LabFiles\validation\cdc-ingestion.json' -Encoding utf8
+   Get-Content 'C:\LabFiles\validation\cdc-ingestion.json'
+   ```
+
+3. Upload the evidence file to the validation storage account. The account name and resource group are derived from your deployment ID, and the script reads them from the environment file the lab created for you:
+
+   ```powershell
+   $envMap = @{}
+   Get-Content 'C:\LabFiles\.env' | ForEach-Object {
+       if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
+   }
+
+   Connect-AzAccount -Identity -ErrorAction SilentlyContinue | Out-Null
+   if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
+
+   $storageAccountName = $envMap['VALIDATION_STORAGE_ACCOUNT']
+   $resourceGroup      = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
+   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $storageAccountName).Context
+
+   Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+       -File 'C:\LabFiles\validation\cdc-ingestion.json' -Blob 'cdc-ingestion.json' -Force | Out-Null
+
+   Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name
+   ```
+
+4. Confirm that `cdc-ingestion.json` appears in the output of the final command.
+
+> [!Note]
+> You will reuse this same upload pattern in Challenges 3, 4, 5, and 6. Only the local file name and blob name change each time.
 
 <validation step="CDC ingestion outcomes"/>
 

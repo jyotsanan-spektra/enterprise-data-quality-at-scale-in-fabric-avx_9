@@ -1,34 +1,46 @@
 using namespace System.Net
 
 # Note: $sub (subscription id) and $DID (deployment id) are injected by the platform.
-$rg = "rg-fabric-challenge-$DID"
+$rg = "rg-fabricdataquality-$DID"
 $count = 0
 $found = $false
 
-function Get-StorageContextFromRg {
+function Get-ValidationStorageAccount {
+    $expectedName = "stfabricval" + $DID.Replace('-', '').ToLower()
+    if ($expectedName.Length -gt 23) {
+        $expectedName = $expectedName.Substring(0, 23)
+    }
+
+    $storage = Get-AzStorageAccount -ResourceGroupName $rg -Name $expectedName -ErrorAction SilentlyContinue
+    if (-not $storage) {
+        $storage = Get-AzStorageAccount -ResourceGroupName $rg -ErrorAction SilentlyContinue |
+            Where-Object { $_.StorageAccountName -like 'stfabricval*' } |
+            Select-Object -First 1
+    }
+
+    return $storage
+}
+
+function Get-ValidationBlobContent {
     param(
-        [string]$ResourceGroupName
+        [Parameter(Mandatory = $true)]
+        $StorageAccount,
+
+        [Parameter(Mandatory = $true)]
+        [string]$BlobName
     )
 
-    $storageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -ErrorAction Stop |
-        Sort-Object StorageAccountName |
-        Select-Object -First 1
-
-    if (-not $storageAccount) {
-        throw "No storage account was found in resource group '$ResourceGroupName'."
+    $ctx = $StorageAccount.Context
+    $blob = Get-AzStorageBlob -Context $ctx -Container 'validation' -Blob $BlobName -ErrorAction SilentlyContinue
+    if (-not $blob) {
+        return $null
     }
 
-    $ctx = $storageAccount.Context
-    if (-not $ctx) {
-        $key = (Get-AzStorageAccountKey -ResourceGroupName $ResourceGroupName -Name $storageAccount.StorageAccountName -ErrorAction Stop |
-            Select-Object -First 1).Value
-        $ctx = New-AzStorageContext -StorageAccountName $storageAccount.StorageAccountName -StorageAccountKey $key
-    }
-
-    return @{
-        Account = $storageAccount
-        Context = $ctx
-    }
+    $tempFile = Join-Path -Path $env:TEMP -ChildPath ([System.Guid]::NewGuid().ToString() + '.json')
+    Get-AzStorageBlobContent -Context $ctx -Container 'validation' -Blob $BlobName -Destination $tempFile -Force -ErrorAction Stop | Out-Null
+    $content = Get-Content -Path $tempFile -Raw -ErrorAction Stop
+    Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+    return $content
 }
 
 do {
@@ -36,67 +48,74 @@ do {
     try {
         Set-AzContext -Subscription $sub -ErrorAction Stop
 
-        $storage = Get-StorageContextFromRg -ResourceGroupName $rg
-        $accountName = $storage.Account.StorageAccountName
-        $ctx = $storage.Context
-
-        $requiredContainerNames = @('fabricvalidation', 'validation', 'evidence')
-        $container = $null
-        foreach ($containerName in $requiredContainerNames) {
-            $candidate = Get-AzStorageContainer -Name $containerName -Context $ctx -ErrorAction SilentlyContinue
-            if ($candidate) {
-                $container = $candidate
-                break
-            }
+        $storage = Get-ValidationStorageAccount
+        if (-not $storage) {
+            throw "No validation storage account starting with 'stfabricval' was found in resource group '$rg'."
         }
 
-        if (-not $container) {
-            throw "No evidence container was found. Expected one of: $($requiredContainerNames -join ', ')."
-        }
+        $content = Get-ValidationBlobContent -StorageAccount $storage -BlobName 'quality-gate.json'
 
-        $blobs = Get-AzStorageBlob -Container $container.Name -Context $ctx -ErrorAction Stop
-
-        $silverSuccessBlob = $blobs | Where-Object {
-            $_.Name -match 'silver_orders' -and $_.Name -match '(success|pass|promot)'
-        } | Sort-Object LastModified -Descending | Select-Object -First 1
-
-        $failureLogBlob = $blobs | Where-Object {
-            $_.Name -match '(quality|dq|data[-_]?quality)' -and $_.Name -match '(fail|error|log)'
-        } | Sort-Object LastModified -Descending | Select-Object -First 1
-
-        $silverBlockBlob = $blobs | Where-Object {
-            $_.Name -match 'silver_orders' -and $_.Name -match '(blocked|prevented|skipped|notwritten)'
-        } | Sort-Object LastModified -Descending | Select-Object -First 1
-
-        if ($silverSuccessBlob -and $failureLogBlob) {
-            $found = $true
-            $detailParts = @(
-                "success evidence '$($silverSuccessBlob.Name)'",
-                "failure log '$($failureLogBlob.Name)'"
-            )
-
-            if ($silverBlockBlob) {
-                $detailParts += "blocked Silver evidence '$($silverBlockBlob.Name)'"
-            }
-
-            $message = @{
-                Status  = "Succeeded"
-                Message = "Spark quality gate evidence validated in storage account '$accountName', container '$($container.Name)': $($detailParts -join '; ')."
-            } | ConvertTo-Json
-        } else {
-            $missing = @()
-            if (-not $silverSuccessBlob) {
-                $missing += "Silver success evidence for silver_orders"
-            }
-            if (-not $failureLogBlob) {
-                $missing += "quality failure log evidence"
-            }
-
+        if (-not $content) {
             $message = @{
                 Status  = "Failed"
-                Message = "Spark quality gate validation is incomplete in storage account '$accountName', container '$($container.Name)'. Missing: $($missing -join '; ')."
+                Message = "Validation evidence blob 'quality-gate.json' was not found in container 'validation' in storage account '$($storage.StorageAccountName)'. Complete Challenge 4 and upload the evidence file described in Task 3."
             } | ConvertTo-Json
         }
+        else {
+            $evidence = $content | ConvertFrom-Json -ErrorAction Stop
+
+            $passStatus = [string]$evidence.passRunOverallStatus
+            $failStatus = [string]$evidence.failRunOverallStatus
+            $failedRule = [string]$evidence.failRunFailedRule
+            $silverBefore = [int]$evidence.silverRowCountAfterPassRun
+            $silverAfter = [int]$evidence.silverRowCountAfterFailRun
+            $silverTable = [string]$evidence.silverTableName
+
+            if ($silverTable -ne 'silver_orders') {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence reports silverTableName '$silverTable', but the required Silver table is 'silver_orders'."
+                } | ConvertTo-Json
+            }
+            elseif ($passStatus -notmatch 'Passed|Succeeded|Success') {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence reports passRunOverallStatus '$passStatus'. The clean-data run must pass all blocking quality checks before Silver promotion."
+                } | ConvertTo-Json
+            }
+            elseif ($failStatus -notmatch 'Failed|Failure') {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence reports failRunOverallStatus '$failStatus'. The defect run must fail the gate so that Silver promotion is blocked."
+                } | ConvertTo-Json
+            }
+            elseif ([string]::IsNullOrWhiteSpace($failedRule)) {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence does not name the quality rule that failed during the defect run. Record the failing rule (for example 'null_check') in failRunFailedRule."
+                } | ConvertTo-Json
+            }
+            elseif ($silverBefore -le 0) {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence reports silverRowCountAfterPassRun=$silverBefore. The passing run should have written rows into 'silver_orders'."
+                } | ConvertTo-Json
+            }
+            elseif ($silverAfter -ne $silverBefore) {
+                $message = @{
+                    Status  = "Failed"
+                    Message = "Evidence reports that 'silver_orders' changed from $silverBefore rows to $silverAfter rows across the failed run. A blocked quality gate must leave the Silver table untouched."
+                } | ConvertTo-Json
+            }
+            else {
+                $found = $true
+                $message = @{
+                    Status  = "Succeeded"
+                    Message = "Spark quality gate validated in storage account '$($storage.StorageAccountName)'. The clean run passed and wrote $silverBefore rows to 'silver_orders'; the defect run failed on rule '$failedRule' and left 'silver_orders' unchanged at $silverAfter rows."
+                } | ConvertTo-Json
+            }
+        }
+
         Push-OutputBinding -Name Response -Value ([HttpResponseContext]@{
             StatusCode = [HttpStatusCode]::OK
             Body       = $message

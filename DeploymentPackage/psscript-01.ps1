@@ -14,8 +14,8 @@ Param(
     [Parameter(Mandatory = $true)]
     [string]$ODLID,
 
-    [Parameter(Mandatory = $true)]
-    [string]$InstallCloudLabsShadow,
+    [Parameter(Mandatory = $false)]
+    [string]$InstallCloudLabsShadow = 'true',
 
     [Parameter(Mandatory = $true)]
     [string]$DeploymentID,
@@ -30,7 +30,19 @@ Param(
     [string]$trainerUserName,
 
     [Parameter(Mandatory = $true)]
-    [string]$trainerUserPassword
+    [string]$trainerUserPassword,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SqlServerFqdn,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SqlDatabaseName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SqlAdminUsername,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SqlAdminPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,12 +55,15 @@ $SamplesRoot = Join-Path $LabRoot 'Samples'
 $ScriptsRoot = Join-Path $LabRoot 'Scripts'
 $DocsRoot = Join-Path $LabRoot 'Docs'
 $LogsRoot = Join-Path $LabRoot 'Logs'
-$RepoRoot = Join-Path $LabRoot 'Starter'
-$DesktopShortcutsPath = Join-Path $PublicDesktop 'Fabric Lab Files'
-$EnvPaths = @(
-    (Join-Path $LabFilesPath '.env'),
-    (Join-Path $RepoRoot '.env')
-)
+$ValidationRoot = Join-Path $LabFilesPath 'validation'
+$EnvPath = Join-Path $LabFilesPath '.env'
+
+# The deployment-time deterministic name for the validation storage account.
+# This MUST stay in lockstep with Exercise-01.md, Exercise-05.md/06.md, and every
+# Validations/*.ps1 script - all four derive the same name from DeploymentID.
+$deploymentIdNoHyphens = $DeploymentID.Replace('-', '').ToLower()
+$ValidationStorageAccountName = 'stfabricval' + $deploymentIdNoHyphens.Substring(0, [Math]::Min(12, $deploymentIdNoHyphens.Length))
+$ValidationContainerName = 'validation'
 
 Start-Transcript -Path 'C:\WindowsAzure\Logs\CloudLabsCustomScriptExtension.txt' -Append
 
@@ -159,8 +174,6 @@ try {
         if (Test-Path $azCmd) {
             Write-Log 'Upgrading Azure CLI to ensure latest command surface.'
             & $azCmd upgrade --yes
-            & $azCmd extension add --name ml --yes 2>$null
-            & $azCmd extension update --name ml 2>$null
         }
 
         Write-Log 'Installing VS Code extensions for Fabric authoring.'
@@ -174,15 +187,23 @@ try {
 
         Write-Log 'Installing Python helper packages.'
         & python -m pip install --upgrade pip
-        & python -m pip install pandas pyarrow deltalake notebook jupyterlab fabric-cicd python-dotenv azure-identity openai
+        & python -m pip install pandas pyarrow deltalake notebook jupyterlab python-dotenv
+
+        Write-Log 'Installing the SqlServer PowerShell module for Contoso_Operations provisioning.'
+        if (-not (Get-Module -ListAvailable -Name SqlServer)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+            Install-Module -Name SqlServer -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
+        }
+        Import-Module SqlServer -ErrorAction Stop
     }
 
-    function Initialize-LabContent {
-        Write-Log 'Creating lab content structure.'
-        foreach ($path in @($LabFilesPath, $LabRoot, $SamplesRoot, $ScriptsRoot, $DocsRoot, $LogsRoot, $RepoRoot)) {
+    function Initialize-LabFolders {
+        foreach ($path in @($LabFilesPath, $LabRoot, $SamplesRoot, $ScriptsRoot, $DocsRoot, $LogsRoot, $ValidationRoot)) {
             Ensure-Directory -Path $path
         }
+    }
 
+    function Write-LabReadme {
         $readme = @'
 # Enterprise Data Quality at Scale in Fabric
 
@@ -190,9 +211,14 @@ This workstation is preconfigured for the Fabric challenge lab.
 
 Included assets:
 - Azure credential helper files on the desktop and in C:\LabFiles
-- Sample SQL, notebook, and prompt input assets under C:\LabFiles\FabricChallengeLab
-- Validation and evidence folders for CDC, SCD Type 2, quality gates, recovery, and orchestration
-- Browser shortcuts for Microsoft Fabric, Microsoft Learn, Azure portal, and Azure AI Foundry
+- Sample data files for the Warehouse/dimension exercises under C:\LabFiles\FabricChallengeLab\Samples
+- The Contoso_Operations order-change simulation script under C:\LabFiles\FabricChallengeLab\Scripts
+- C:\LabFiles\validation, used throughout the lab to stage evidence files before they are uploaded to the validation storage account
+- Browser shortcuts for Microsoft Fabric, Microsoft Learn, and the Azure portal
+
+Source system:
+- The Contoso_Operations Azure SQL database (Orders, Customers, Products) is pre-provisioned with CDC enabled on
+  dbo.Orders. Connection details are in C:\LabFiles\.env.
 
 Authoring references captured from Microsoft Learn:
 - Fabric notebooks and PySpark: https://learn.microsoft.com/fabric/data-science/python-guide/python-overview
@@ -204,19 +230,24 @@ Authoring references captured from Microsoft Learn:
 - Delta Lake time travel: https://learn.microsoft.com/fabric/data-engineering/delta-lake-time-travel
 - Delta Lake restore: https://learn.microsoft.com/fabric/data-engineering/delta-lake-restore
 - Delta Lake clone: https://learn.microsoft.com/fabric/data-engineering/delta-lake-clone
-- Azure OpenAI resource endpoint and key retrieval: https://learn.microsoft.com/azure/ai-foundry/openai/how-to/create-resource#retrieve-information-about-the-resource
-- Foundry project CLI show: https://learn.microsoft.com/azure/foundry/how-to/create-projects#create-multiple-projects-on-the-same-resource
-- Foundry/AI SDK token acquisition guidance: https://learn.microsoft.com/azure/foundry/how-to/develop/sdk-overview
-- Blob upload-batch with auth-mode login: https://learn.microsoft.com/azure/storage/blobs/storage-quickstart-blobs-cli#upload-a-blob
+
+IMPORTANT: Fabric notebooks run on remote Spark compute, not on this VM. Any lab step that saves a
+validation evidence file to C:\LabFiles\validation must be run from a local PowerShell window on this
+VM, using literal values you copied from Fabric (row counts, version numbers, statuses) - never from
+inside a notebook cell, which cannot see this VM's file system.
 '@
         Set-Content -Path (Join-Path $LabRoot 'README.md') -Value $readme -Force
+    }
 
+    function Write-LabEnvFile {
         $envContent = @"
 FABRIC_PORTAL_URL=https://app.fabric.microsoft.com
-AI_FOUNDRY_PORTAL_URL=https://ai.azure.com
-FABRIC_WORKSPACE_NAME=contoso-fabric-$DeploymentID
-FABRIC_LAKEHOUSE_NAME=ContosoOperationsLakehouse
-FABRIC_WAREHOUSE_NAME=ContosoOperationsWarehouse
+FABRIC_WORKSPACE_NAME_HINT=contoso-fabric-$DeploymentID
+FABRIC_LAKEHOUSE_NAME=contoso_medallion_lh
+FABRIC_WAREHOUSE_NAME=contoso_gold_wh
+FABRIC_COPYJOB_NAME=orders-to-bronze-cdc
+FABRIC_PIPELINE_NAME=contoso-medallion-orchestration
+FABRIC_NOTEBOOK_NAME=nb_data_quality_gate
 BRONZE_TABLE_NAME=bronze_orders_cdc
 SILVER_TABLE_NAME=silver_orders
 GOLD_DIMENSION_NAME=dim_customer
@@ -234,527 +265,391 @@ ODL_ID=$ODLID
 DEPLOYMENT_ID=$DeploymentID
 LABFILES_ROOT=$LabRoot
 EVIDENCE_ROOT=$LogsRoot
-AZURE_OPENAI_ENDPOINT=__TO_BE_DISCOVERED__
-AZURE_OPENAI_API_KEY=__TO_BE_DISCOVERED__
-AZURE_OPENAI_DEPLOYMENT=__TO_BE_DISCOVERED__
-AZURE_OPENAI_RESOURCE_NAME=__TO_BE_DISCOVERED__
-AZURE_OPENAI_RESOURCE_GROUP=__TO_BE_DISCOVERED__
-AI_FOUNDRY_PROJECT_NAME=__TO_BE_DISCOVERED__
-AI_FOUNDRY_PROJECT_ID=__TO_BE_DISCOVERED__
-AI_FOUNDRY_PROJECT_ENDPOINT=__TO_BE_DISCOVERED__
-AI_FOUNDRY_ACCOUNT_NAME=__TO_BE_DISCOVERED__
-AI_FOUNDRY_TOKEN=__TO_BE_DISCOVERED__
-STORAGE_ACCOUNT_NAME=__TO_BE_DISCOVERED__
-STORAGE_CONTAINER=__TO_BE_DISCOVERED__
-STORAGE_BLOB_ENDPOINT=__TO_BE_DISCOVERED__
-SAMPLE_DOCUMENTS_PATH=$SamplesRoot\Documents
+VALIDATION_ROOT=$ValidationRoot
+SQL_SERVER_FQDN=$SqlServerFqdn
+SQL_DATABASE_NAME=$SqlDatabaseName
+SQL_ADMIN_USERNAME=$SqlAdminUsername
+SQL_ADMIN_PASSWORD=$SqlAdminPassword
+VALIDATION_STORAGE_ACCOUNT=$ValidationStorageAccountName
+VALIDATION_CONTAINER=$ValidationContainerName
 "@
-        foreach ($envPath in $EnvPaths) {
-            Ensure-Directory -Path (Split-Path -Path $envPath -Parent)
-            Set-Content -Path $envPath -Value $envContent -Force
+        Set-Content -Path $EnvPath -Value $envContent -Force
+    }
+
+    function New-CustomerRows {
+        $segments = @('Enterprise', 'SMB', 'Consumer', 'Public Sector', 'Education')
+        $countries = @('United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Australia', 'India', 'Japan', 'Brazil', 'Mexico')
+
+        $rows = New-Object System.Collections.Generic.List[object]
+        for ($i = 1; $i -le 5000; $i++) {
+            $rows.Add([pscustomobject]@{
+                CustomerID   = $i
+                CustomerName = "Contoso Customer $i"
+                Segment      = $segments[$i % $segments.Count]
+                Country      = $countries[$i % $countries.Count]
+            })
         }
 
-        $ordersCsv = @'
-OrderID,CustomerID,ProductID,OrderDate,Quantity,UnitPrice,OrderStatus,ModifiedDate
-1001,C100,P10,2024-01-10,3,45.50,Submitted,2024-01-10T09:00:00Z
-1002,C101,P11,2024-01-11,2,15.00,Submitted,2024-01-11T10:30:00Z
-1003,C102,P12,2024-01-12,1,99.99,Shipped,2024-01-12T14:00:00Z
-1004,C100,P13,2024-01-12,5,9.99,Submitted,2024-01-12T15:15:00Z
+        return [pscustomobject]@{
+            Rows      = $rows
+            Segments  = $segments
+            Countries = $countries
+        }
+    }
+
+    function Write-CustomerSamples {
+        param($CustomerData)
+
+        $rows = $CustomerData.Rows
+        $segments = $CustomerData.Segments
+        $countries = $CustomerData.Countries
+
+        $rows | Export-Csv -Path (Join-Path $SamplesRoot 'customers_baseline.csv') -NoTypeInformation -Force
+
+        $changeRows = New-Object System.Collections.Generic.List[object]
+        for ($i = 1; $i -le 200; $i++) {
+            $customerId = $i * 25
+            $baseline = $rows[$customerId - 1]
+            $newSegment = $segments[($segments.IndexOf($baseline.Segment) + 1) % $segments.Count]
+            $newCountry = $countries[($countries.IndexOf($baseline.Country) + 1) % $countries.Count]
+
+            $changeRows.Add([pscustomobject]@{
+                CustomerID   = $customerId
+                CustomerName = $baseline.CustomerName
+                Segment      = $newSegment
+                Country      = $newCountry
+            })
+        }
+        $changeRows | Export-Csv -Path (Join-Path $SamplesRoot 'customers_changes.csv') -NoTypeInformation -Force
+
+        return $changeRows
+    }
+
+    function Write-QualityDefectSample {
+        param($Countries)
+
+        $rows = New-Object System.Collections.Generic.List[object]
+        for ($i = 1; $i -le 100; $i++) {
+            $orderId = if ($i -le 10) { '' } else { 900000 + $i }
+            $unitPrice = [math]::Round((($i % 50) + 10) * 1.5, 2)
+            $quantity = ($i % 10) + 1
+
+            $rows.Add([pscustomobject]@{
+                OrderID         = $orderId
+                CustomerID      = ($i % 5000) + 1
+                OrderDate       = (Get-Date).AddDays(-$i).ToString('yyyy-MM-dd')
+                ShipDate        = (Get-Date).AddDays(-$i + 3).ToString('yyyy-MM-dd')
+                OrderStatus     = 'Submitted'
+                ProductID       = ($i % 500) + 1
+                Quantity        = $quantity
+                UnitPrice       = $unitPrice
+                Discount        = 0
+                Revenue         = [math]::Round($unitPrice * $quantity, 2)
+                ShippingCountry = $Countries[$i % $Countries.Count]
+                PaymentMethod   = 'CreditCard'
+            })
+        }
+
+        $rows | Export-Csv -Path (Join-Path $SamplesRoot 'quality_defect.csv') -NoTypeInformation -Force
+    }
+
+    function Write-ProvisioningSqlScript {
+        $sql = @'
+IF OBJECT_ID('dbo.Orders','U') IS NOT NULL DROP TABLE dbo.Orders;
+CREATE TABLE dbo.Orders (
+    OrderID         INT NOT NULL PRIMARY KEY,
+    CustomerID      INT NOT NULL,
+    OrderDate       DATE NOT NULL,
+    ShipDate        DATE NULL,
+    OrderStatus     VARCHAR(20) NOT NULL,
+    ProductID       INT NOT NULL,
+    Quantity        INT NOT NULL,
+    UnitPrice       DECIMAL(10,2) NOT NULL,
+    Discount        DECIMAL(5,2) NOT NULL,
+    Revenue         DECIMAL(12,2) NOT NULL,
+    ShippingCountry VARCHAR(50) NOT NULL,
+    PaymentMethod   VARCHAR(30) NOT NULL
+);
+
+IF OBJECT_ID('dbo.Customers','U') IS NOT NULL DROP TABLE dbo.Customers;
+CREATE TABLE dbo.Customers (
+    CustomerID   INT NOT NULL PRIMARY KEY,
+    CustomerName VARCHAR(200) NOT NULL,
+    Segment      VARCHAR(50) NOT NULL,
+    Country      VARCHAR(50) NOT NULL
+);
+
+IF OBJECT_ID('dbo.Products','U') IS NOT NULL DROP TABLE dbo.Products;
+CREATE TABLE dbo.Products (
+    ProductID   INT NOT NULL PRIMARY KEY,
+    ProductName VARCHAR(200) NOT NULL,
+    Category    VARCHAR(100) NOT NULL
+);
+
+;WITH Tally AS (
+    SELECT TOP (1000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn
+    FROM sys.all_objects
+)
+INSERT INTO dbo.Products (ProductID, ProductName, Category)
+SELECT rn, CONCAT('Product ', rn),
+    CASE (rn % 5)
+        WHEN 0 THEN 'Hardware' WHEN 1 THEN 'Software' WHEN 2 THEN 'Services'
+        WHEN 3 THEN 'Accessories' ELSE 'Support'
+    END
+FROM Tally;
+
+;WITH Tally AS (
+    SELECT TOP (100000) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn
+    FROM sys.all_objects a CROSS JOIN sys.all_objects b
+)
+INSERT INTO dbo.Orders (OrderID, CustomerID, OrderDate, ShipDate, OrderStatus, ProductID, Quantity, UnitPrice, Discount, Revenue, ShippingCountry, PaymentMethod)
+SELECT
+    rn AS OrderID,
+    ((rn - 1) % 5000) + 1 AS CustomerID,
+    DATEADD(DAY, -(rn % 400), CAST(GETDATE() AS DATE)) AS OrderDate,
+    DATEADD(DAY, -(rn % 400) + 3, CAST(GETDATE() AS DATE)) AS ShipDate,
+    CASE (rn % 4) WHEN 0 THEN 'Submitted' WHEN 1 THEN 'Shipped' WHEN 2 THEN 'Delivered' ELSE 'Cancelled' END,
+    ((rn - 1) % 1000) + 1 AS ProductID,
+    ((rn % 10) + 1) AS Quantity,
+    CAST((((rn % 50) + 10) * 1.25) AS DECIMAL(10,2)) AS UnitPrice,
+    CAST((rn % 5) AS DECIMAL(5,2)) AS Discount,
+    CAST(((((rn % 50) + 10) * 1.25) * ((rn % 10) + 1)) AS DECIMAL(12,2)) AS Revenue,
+    CASE (rn % 10)
+        WHEN 0 THEN 'United States' WHEN 1 THEN 'Canada' WHEN 2 THEN 'United Kingdom'
+        WHEN 3 THEN 'Germany' WHEN 4 THEN 'France' WHEN 5 THEN 'Australia'
+        WHEN 6 THEN 'India' WHEN 7 THEN 'Japan' WHEN 8 THEN 'Brazil' ELSE 'Mexico'
+    END,
+    CASE (rn % 3) WHEN 0 THEN 'CreditCard' WHEN 1 THEN 'PayPal' ELSE 'BankTransfer' END
+FROM Tally;
+
+IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = DB_NAME() AND is_cdc_enabled = 1)
+BEGIN
+    EXEC sys.sp_cdc_enable_db;
+END
+
+IF NOT EXISTS (SELECT 1 FROM cdc.change_tables WHERE capture_instance = 'dbo_Orders')
+BEGIN
+    EXEC sys.sp_cdc_enable_table
+        @source_schema = N'dbo',
+        @source_name   = N'Orders',
+        @role_name     = NULL,
+        @supports_net_changes = 1;
+END
 '@
-        Set-Content -Path (Join-Path $SamplesRoot 'orders_baseline.csv') -Value $ordersCsv -Force
+        $sqlPath = Join-Path $ScriptsRoot 'provision-contoso-operations.sql'
+        Set-Content -Path $sqlPath -Value $sql -Force
+        return $sqlPath
+    }
 
-        $ordersDeltaCsv = @'
-OrderID,CustomerID,ProductID,OrderDate,Quantity,UnitPrice,OrderStatus,ModifiedDate,Operation
-1002,C101,P11,2024-01-11,4,15.00,Shipped,2024-01-13T10:15:00Z,UPDATE
-1005,C103,P14,2024-01-13,2,22.50,Submitted,2024-01-13T11:00:00Z,INSERT
-1006,C100,P15,2024-01-13,1,250.00,Submitted,2024-01-13T11:05:00Z,INSERT
+    function Write-CustomerSeedSqlScript {
+        param($Rows)
+
+        $builder = New-Object System.Text.StringBuilder
+        $batchSize = 500
+        for ($start = 0; $start -lt $Rows.Count; $start += $batchSize) {
+            $batch = $Rows[$start..([Math]::Min($start + $batchSize - 1, $Rows.Count - 1))]
+            $valueLines = foreach ($row in $batch) {
+                $name = $row.CustomerName.Replace("'", "''")
+                "($($row.CustomerID), N'$name', N'$($row.Segment)', N'$($row.Country)')"
+            }
+            [void]$builder.AppendLine("INSERT INTO dbo.Customers (CustomerID, CustomerName, Segment, Country) VALUES")
+            [void]$builder.AppendLine(($valueLines -join ",`r`n"))
+            [void]$builder.AppendLine(";")
+        }
+
+        $sqlPath = Join-Path $ScriptsRoot 'seed-customers.sql'
+        Set-Content -Path $sqlPath -Value $builder.ToString() -Force
+        return $sqlPath
+    }
+
+    function Write-OrderChangeSimulationAssets {
+        $sql = @'
+-- Simulates the incremental Contoso_Operations.Orders change set used in Challenge 2, Task 4.
+-- Safe to run only once per deployment: the INSERT block is skipped if it already ran.
+IF NOT EXISTS (SELECT 1 FROM dbo.Orders WHERE OrderID = 100001)
+BEGIN
+    ;WITH Tally AS (
+        SELECT TOP (350) ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS rn
+        FROM sys.all_objects
+    )
+    INSERT INTO dbo.Orders (OrderID, CustomerID, OrderDate, ShipDate, OrderStatus, ProductID, Quantity, UnitPrice, Discount, Revenue, ShippingCountry, PaymentMethod)
+    SELECT
+        100000 + rn,
+        ((rn - 1) % 5000) + 1,
+        CAST(GETDATE() AS DATE),
+        DATEADD(DAY, 3, CAST(GETDATE() AS DATE)),
+        'Submitted',
+        ((rn - 1) % 1000) + 1,
+        ((rn % 10) + 1),
+        CAST((((rn % 50) + 10) * 1.25) AS DECIMAL(10,2)),
+        CAST((rn % 5) AS DECIMAL(5,2)),
+        CAST(((((rn % 50) + 10) * 1.25) * ((rn % 10) + 1)) AS DECIMAL(12,2)),
+        'United States',
+        'CreditCard'
+    FROM Tally;
+END
+
+UPDATE TOP (150) dbo.Orders
+SET OrderStatus = 'Shipped',
+    ShipDate = CAST(GETDATE() AS DATE)
+WHERE OrderID BETWEEN 1 AND 150;
 '@
-        Set-Content -Path (Join-Path $SamplesRoot 'orders_incremental.csv') -Value $ordersDeltaCsv -Force
+        Set-Content -Path (Join-Path $ScriptsRoot 'apply-order-changes.sql') -Value $sql -Force
 
-        $customersCsv = @'
-CustomerID,CustomerName,Region,Email,IsPreferred,ModifiedDate
-C100,Alpine Ski House,Northwest,alpine@example.com,true,2024-01-10T09:00:00Z
-C101,Blue Yonder Airlines,Southwest,blueyonder@example.com,false,2024-01-10T09:00:00Z
-C102,Contoso Retail,Central,contoso@example.com,true,2024-01-10T09:00:00Z
-C103,Fabrikam Services,Northeast,fabrikam@example.com,false,2024-01-10T09:00:00Z
-'@
-        Set-Content -Path (Join-Path $SamplesRoot 'customers_baseline.csv') -Value $customersCsv -Force
-
-        $customersDeltaCsv = @'
-CustomerID,CustomerName,Region,Email,IsPreferred,ModifiedDate,ExpectedSCDAction
-C101,Blue Yonder Airlines,Mountain,blueyonder@example.com,false,2024-01-14T08:15:00Z,EXPIRE_AND_INSERT
-C103,Fabrikam Services,Northeast,enterprise-support@fabrikam.example,false,2024-01-14T08:30:00Z,EXPIRE_AND_INSERT
-'@
-        Set-Content -Path (Join-Path $SamplesRoot 'customers_changes.csv') -Value $customersDeltaCsv -Force
-
-        $qualityDefectCsv = @'
-OrderID,CustomerID,ProductID,OrderDate,Quantity,UnitPrice,OrderStatus,ModifiedDate,DefectType
-1007,,P17,2024-01-14,-2,45.00,Submitted,2024-01-14T10:00:00Z,NULL_CUSTOMER_AND_NEGATIVE_QUANTITY
-'@
-        Set-Content -Path (Join-Path $SamplesRoot 'quality_defect.csv') -Value $qualityDefectCsv -Force
-
-        $documentsRoot = Join-Path $SamplesRoot 'Documents'
-        Ensure-Directory -Path $documentsRoot
-        Set-Content -Path (Join-Path $documentsRoot 'contoso-order-brief-01.txt') -Value 'Contoso Operations order brief 01. Use this sample document for AI-assisted exploration and storage upload validation.' -Force
-        Set-Content -Path (Join-Path $documentsRoot 'contoso-order-brief-02.txt') -Value 'Contoso Operations order brief 02. This file validates that bootstrap uploaded starter documents into blob storage.' -Force
-        Set-Content -Path (Join-Path $documentsRoot 'customer-history-note.txt') -Value 'Customer history note. Use as sample prompt/document input for Foundry project exercises.' -Force
-
-        $bronzeToSilverNotebook = @'
-# Fabric notebook starter - Bronze to Silver quality gate
-from pyspark.sql import functions as F
-
-BRONZE_TABLE = "bronze_orders_cdc"
-SILVER_TABLE = "silver_orders"
-QUALITY_LOG_TABLE = "silver_quality_log"
-
-bronze_df = spark.table(BRONZE_TABLE)
-
-checks = {
-    "null_customer": bronze_df.filter(F.col("CustomerID").isNull()).count(),
-    "negative_quantity": bronze_df.filter(F.col("Quantity") <= 0).count(),
-    "invalid_price": bronze_df.filter(F.col("UnitPrice") <= 0).count(),
-    "missing_status": bronze_df.filter(F.col("OrderStatus").isNull()).count(),
-    "stale_modifieddate": bronze_df.filter(F.col("ModifiedDate").isNull()).count()
+        $wrapper = @'
+# Applies ~500 changed/new rows to Contoso_Operations.Orders (350 inserts + 150 updates).
+# Run this ONCE, after the Copy job's baseline load has succeeded (Challenge 2, Task 3),
+# then rerun the orders-to-bronze-cdc Copy job to capture the change set.
+$ErrorActionPreference = 'Stop'
+$envPath = 'C:\LabFiles\.env'
+if (-not (Test-Path $envPath)) {
+    throw "Cannot find $envPath. Re-run the lab VM bootstrap or contact support."
 }
 
-failed_checks = [name for name, count in checks.items() if count > 0]
+$envMap = @{}
+Get-Content $envPath | ForEach-Object {
+    if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
+}
 
-if failed_checks:
-    raise Exception(f"Quality gate failed: {failed_checks}")
-else:
-    bronze_df.write.mode("overwrite").format("delta").saveAsTable(SILVER_TABLE)
+Import-Module SqlServer -ErrorAction Stop
+Invoke-Sqlcmd -ServerInstance $envMap['SQL_SERVER_FQDN'] `
+    -Database $envMap['SQL_DATABASE_NAME'] `
+    -Username $envMap['SQL_ADMIN_USERNAME'] `
+    -Password $envMap['SQL_ADMIN_PASSWORD'] `
+    -InputFile (Join-Path $PSScriptRoot 'apply-order-changes.sql') `
+    -TrustServerCertificate
+
+Write-Host 'Applied the Contoso_Operations order change set (approximately 500 rows). Now rerun the orders-to-bronze-cdc Copy job in Fabric.'
 '@
-        Set-Content -Path (Join-Path $ScriptsRoot 'quality-gate-notebook.py') -Value $bronzeToSilverNotebook -Force
+        Set-Content -Path (Join-Path $ScriptsRoot 'Apply-OrderChanges.ps1') -Value $wrapper -Force
 
-        $warehouseSql = @'
--- Customer dimension starter for SCD Type 2
-CREATE TABLE dbo.dim_customer
-(
-    CustomerSK BIGINT NOT NULL,
-    CustomerID VARCHAR(50) NOT NULL,
-    CustomerName VARCHAR(200) NOT NULL,
-    Region VARCHAR(100) NULL,
-    Email VARCHAR(200) NULL,
-    IsPreferred BIT NULL,
-    EffectiveFrom DATETIME2 NOT NULL,
-    EffectiveTo DATETIME2 NULL,
-    IsCurrent BIT NOT NULL
-);
+        $readme = @'
+# FabricChallengeLab\Scripts
+
+Apply-OrderChanges.ps1
+  Run this from a local PowerShell window on this VM (not from a Fabric notebook) after the Copy
+  job's first (baseline) run has succeeded. It inserts ~350 new Orders rows and updates ~150
+  existing rows, giving you the ~500-row change set that Challenge 2, Task 4 asks you to capture
+  with a second Copy job run. Safe to run only once per deployment.
+
+provision-contoso-operations.sql / seed-customers.sql
+  Used by the lab bootstrap to create and seed the Contoso_Operations database. You do not need
+  to run these yourself.
 '@
-        Set-Content -Path (Join-Path $ScriptsRoot 'create-dim-customer.sql') -Value $warehouseSql -Force
+        Set-Content -Path (Join-Path $ScriptsRoot 'README.txt') -Value $readme -Force
+    }
 
-        $recoverySql = @'
--- Delta Lake investigation helpers
-DESCRIBE HISTORY silver_orders;
--- Example restore command to use after identifying a valid version:
--- RESTORE TABLE silver_orders TO VERSION AS OF 1;
--- Example shallow clone pattern:
--- CREATE TABLE silver_orders_backup SHALLOW CLONE silver_orders VERSION AS OF 1;
-'@
-        Set-Content -Path (Join-Path $ScriptsRoot 'delta-recovery.sql') -Value $recoverySql -Force
-
+    function Write-DesktopShortcuts {
         Set-Content -Path (Join-Path $PublicDesktop 'Microsoft Fabric.url') -Value "[InternetShortcut]`r`nURL=https://app.fabric.microsoft.com`r`n" -Force
         Set-Content -Path (Join-Path $PublicDesktop 'Microsoft Learn - Fabric.url') -Value "[InternetShortcut]`r`nURL=https://learn.microsoft.com/fabric/`r`n" -Force
         Set-Content -Path (Join-Path $PublicDesktop 'Azure Portal.url') -Value "[InternetShortcut]`r`nURL=https://portal.azure.com`r`n" -Force
-        Set-Content -Path (Join-Path $PublicDesktop 'Azure AI Foundry.url') -Value "[InternetShortcut]`r`nURL=https://ai.azure.com`r`n" -Force
 
-        if (-not (Test-Path $DesktopShortcutsPath)) {
-            New-Item -Path $DesktopShortcutsPath -ItemType Junction -Value $LabRoot | Out-Null
+        $desktopShortcutsPath = Join-Path $PublicDesktop 'Fabric Lab Files'
+        if (-not (Test-Path $desktopShortcutsPath)) {
+            New-Item -Path $desktopShortcutsPath -ItemType Junction -Value $LabRoot | Out-Null
         }
     }
 
-    function Get-AzCliPath {
-        $cmd = (Get-Command az.cmd -ErrorAction SilentlyContinue).Source
-        if (-not $cmd) {
-            $cmd = (Get-Command az -ErrorAction SilentlyContinue).Source
+    function Deploy-ContosoOperationsDatabase {
+        Write-Log "Provisioning schema, sample data, and CDC on $SqlDatabaseName ($SqlServerFqdn)."
+
+        $customerData = New-CustomerRows
+        Write-CustomerSamples -CustomerData $customerData | Out-Null
+        Write-QualityDefectSample -Countries $customerData.Countries
+
+        $schemaScriptPath = Write-ProvisioningSqlScript
+        $customerSeedPath = Write-CustomerSeedSqlScript -Rows $customerData.Rows
+        Write-OrderChangeSimulationAssets
+
+        $sqlParams = @{
+            ServerInstance         = $SqlServerFqdn
+            Database               = $SqlDatabaseName
+            Username               = $SqlAdminUsername
+            Password               = $SqlAdminPassword
+            TrustServerCertificate = $true
+            QueryTimeout           = 600
         }
-        if (-not $cmd) {
-            throw 'Azure CLI was not found after installation.'
-        }
-        return $cmd
+
+        Write-Log 'Creating Orders/Customers/Products tables, seeding Orders and Products, and enabling CDC on dbo.Orders.'
+        Invoke-Sqlcmd @sqlParams -InputFile $schemaScriptPath
+
+        Write-Log 'Seeding the Customers table (must match customers_baseline.csv exactly).'
+        Invoke-Sqlcmd @sqlParams -InputFile $customerSeedPath
+
+        Write-Log 'Contoso_Operations provisioning complete.'
     }
 
-    function Invoke-AzJson {
-        param(
-            [Parameter(Mandatory = $true)]
-            [string[]]$Arguments,
-            [switch]$AllowFailure
-        )
+    function Register-FabricSqlConnection {
+        # Best-effort: pre-create a Fabric shareable cloud connection to Contoso_Operations so
+        # Exercise 2 has a ready-made connection to select. This uses the Fabric REST API "Create
+        # connection" surface, which has changed shape over time - if it fails, Exercise 2's own
+        # instructions already cover creating the connection manually in the Fabric UI, so this
+        # is never treated as fatal to the overall bootstrap.
+        try {
+            Write-Log 'Attempting to pre-create a Fabric connection for Contoso_Operations (best effort).'
+            $azCmd = (Get-Command az.cmd -ErrorAction SilentlyContinue).Source
+            if (-not $azCmd) { $azCmd = (Get-Command az -ErrorAction SilentlyContinue).Source }
+            if (-not $azCmd) { throw 'Azure CLI was not found.' }
 
-        $azCmd = Get-AzCliPath
-        $output = & $azCmd @Arguments 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            if ($AllowFailure) {
-                return $null
-            }
-            throw "Azure CLI command failed: az $($Arguments -join ' ')`n$output"
-        }
+            $tokenJson = & $azCmd account get-access-token --resource 'https://api.fabric.microsoft.com' 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $tokenJson) { throw 'Unable to acquire a Fabric access token for connection pre-creation.' }
+            $token = ($tokenJson | ConvertFrom-Json).accessToken
 
-        if (-not $output) {
-            return $null
-        }
-
-        $text = ($output | Out-String).Trim()
-        if ([string]::IsNullOrWhiteSpace($text)) {
-            return $null
-        }
-
-        return $text | ConvertFrom-Json
-    }
-
-    function Connect-AzureForLab {
-        Write-Log 'Authenticating Azure CLI with CloudLabs user credentials.'
-        $azCmd = Get-AzCliPath
-
-        & $azCmd login --service-principal -u $AzureUserName -p $AzurePassword --tenant $AzureTenantID 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Log 'Service principal login failed. Trying user-based login.'
-            & $azCmd login -u $AzureUserName -p $AzurePassword --tenant $AzureTenantID
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Azure CLI login failed for both service principal and user auth flows.'
-            }
-        }
-
-        & $azCmd account set --subscription $AzureSubscriptionID
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to set Azure subscription context.'
-        }
-    }
-
-    function Get-ResourceGroupForDeployment {
-        Write-Log 'Discovering deployment resource group from deployment identifier tags.'
-        $groups = Invoke-AzJson -Arguments @('group', 'list', '--query', "[?tags.DeploymentID=='$DeploymentID' || tags.deploymentId=='$DeploymentID' || tags.ODLID=='$ODLID' || tags.odlid=='$ODLID'].{name:name,id:id}") -AllowFailure
-        if ($groups -and $groups.Count -gt 0) {
-            return $groups[0].name
-        }
-
-        $vmName = $env:COMPUTERNAME
-        $vm = Invoke-AzJson -Arguments @('vm', 'list', '--query', "[?name=='$vmName'].{resourceGroup:resourceGroup,name:name}") -AllowFailure
-        if ($vm -and $vm.Count -gt 0) {
-            return $vm[0].resourceGroup
-        }
-
-        $allGroups = Invoke-AzJson -Arguments @('group', 'list')
-        if ($allGroups.Count -eq 1) {
-            return $allGroups[0].name
-        }
-
-        throw 'Unable to determine the Azure resource group for this lab deployment.'
-    }
-
-    function Get-AzureOpenAiDetails {
-        param([string]$ResourceGroupName)
-
-        Write-Log "Discovering Azure OpenAI account in resource group $ResourceGroupName."
-        $accounts = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'list', '--resource-group', $ResourceGroupName)
-        $openAiAccount = $accounts | Where-Object { $_.kind -eq 'OpenAI' } | Select-Object -First 1
-        if (-not $openAiAccount) {
-            throw "No Azure OpenAI account was found in resource group $ResourceGroupName."
-        }
-
-        $accountShow = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'show', '--name', $openAiAccount.name, '--resource-group', $ResourceGroupName)
-        $keys = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'keys', 'list', '--name', $openAiAccount.name, '--resource-group', $ResourceGroupName)
-        $deployments = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'deployment', 'list', '--name', $openAiAccount.name, '--resource-group', $ResourceGroupName) -AllowFailure
-
-        $deploymentName = $null
-        if ($deployments) {
-            $selectedDeployment = $deployments | Select-Object -First 1
-            if ($selectedDeployment -and $selectedDeployment.name) {
-                $deploymentName = $selectedDeployment.name
-            }
-        }
-
-        if (-not $deploymentName) {
-            $resourceDeployments = Invoke-AzJson -Arguments @('resource', 'list', '--resource-group', $ResourceGroupName, '--resource-type', 'Microsoft.CognitiveServices/accounts/deployments') -AllowFailure
-            if ($resourceDeployments) {
-                $matching = $resourceDeployments | Where-Object { $_.id -like "*/accounts/$($openAiAccount.name)/deployments/*" } | Select-Object -First 1
-                if ($matching) {
-                    $deploymentName = ($matching.name -split '/')[-1]
+            $body = @{
+                connectivityType  = 'ShareableCloud'
+                displayName       = 'Contoso_Operations'
+                connectionDetails = @{
+                    type           = 'SQL'
+                    creationMethod = 'SQL'
+                    parameters     = @(
+                        @{ dataType = 'Text'; name = 'server'; value = $SqlServerFqdn }
+                        @{ dataType = 'Text'; name = 'database'; value = $SqlDatabaseName }
+                    )
                 }
-            }
-        }
-
-        if (-not $deploymentName) {
-            throw "No model deployment was found under Azure OpenAI account $($openAiAccount.name)."
-        }
-
-        return [ordered]@{
-            ResourceName = $openAiAccount.name
-            ResourceGroup = $ResourceGroupName
-            Endpoint = $accountShow.properties.endpoint
-            ApiKey = $keys.key1
-            DeploymentName = $deploymentName
-            ResourceId = $openAiAccount.id
-            Location = $openAiAccount.location
-        }
-    }
-
-    function Get-AiFoundryProjectDetails {
-        param([string]$ResourceGroupName)
-
-        Write-Log "Discovering Azure AI Foundry project/workspace in resource group $ResourceGroupName."
-        $project = $null
-        $projectSource = $null
-
-        $accountProjects = Invoke-AzJson -Arguments @('resource', 'list', '--resource-group', $ResourceGroupName, '--resource-type', 'Microsoft.CognitiveServices/accounts/projects') -AllowFailure
-        if ($accountProjects) {
-            $project = $accountProjects | Select-Object -First 1
-            $projectSource = 'CognitiveServicesProject'
-        }
-
-        if (-not $project) {
-            $mlProjects = Invoke-AzJson -Arguments @('resource', 'list', '--resource-group', $ResourceGroupName, '--resource-type', 'Microsoft.MachineLearningServices/workspaces') -AllowFailure
-            if ($mlProjects) {
-                $project = ($mlProjects | Where-Object { $_.kind -eq 'Project' } | Select-Object -First 1)
-                if (-not $project) {
-                    $project = ($mlProjects | Where-Object { $_.kind -eq 'Hub' } | Select-Object -First 1)
-                }
-                if (-not $project) {
-                    $project = $mlProjects | Select-Object -First 1
-                }
-                $projectSource = 'MachineLearningWorkspace'
-            }
-        }
-
-        if (-not $project) {
-            throw "No Azure AI Foundry project or workspace was found in resource group $ResourceGroupName."
-        }
-
-        $projectName = ($project.name -split '/')[-1]
-        $parentAccountName = $null
-        $projectEndpoint = $null
-        $projectKind = $project.kind
-
-        if ($projectSource -eq 'CognitiveServicesProject') {
-            $nameParts = $project.name -split '/'
-            if ($nameParts.Count -ge 2) {
-                $parentAccountName = $nameParts[0]
-            }
-            if ($parentAccountName) {
-                $projectShow = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'project', 'show', '--name', $parentAccountName, '--resource-group', $ResourceGroupName, '--project-name', $projectName) -AllowFailure
-                if ($projectShow) {
-                    if ($projectShow.properties.endpoint) {
-                        $projectEndpoint = $projectShow.properties.endpoint
-                    }
-                    elseif ($projectShow.endpoint) {
-                        $projectEndpoint = $projectShow.endpoint
+                privacyLevel      = 'Organizational'
+                credentialDetails = @{
+                    credentials = @{
+                        credentialType = 'Basic'
+                        username       = $SqlAdminUsername
+                        password       = $SqlAdminPassword
                     }
                 }
-            }
+            } | ConvertTo-Json -Depth 10
+
+            Invoke-RestMethod -Method Post -Uri 'https://api.fabric.microsoft.com/v1/connections' `
+                -Headers @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' } `
+                -Body $body -ErrorAction Stop | Out-Null
+
+            Write-Log 'Fabric connection for Contoso_Operations created successfully.'
         }
-
-        if (-not $projectEndpoint -and $project.properties -and $project.properties.endpoint) {
-            $projectEndpoint = $project.properties.endpoint
-        }
-
-        if (-not $projectEndpoint -and $project.properties -and $project.properties.discoveryUrl) {
-            $projectEndpoint = $project.properties.discoveryUrl
-        }
-
-        if (-not $projectEndpoint -and $parentAccountName) {
-            $parentAccount = Invoke-AzJson -Arguments @('cognitiveservices', 'account', 'show', '--name', $parentAccountName, '--resource-group', $ResourceGroupName) -AllowFailure
-            if ($parentAccount -and $parentAccount.properties.endpoint) {
-                $projectEndpoint = $parentAccount.properties.endpoint
-            }
-        }
-
-        if (-not $projectEndpoint -and $projectSource -eq 'MachineLearningWorkspace') {
-            $workspaceShow = Invoke-AzJson -Arguments @('resource', 'show', '--ids', $project.id) -AllowFailure
-            if ($workspaceShow -and $workspaceShow.properties -and $workspaceShow.properties.discoveryUrl) {
-                $projectEndpoint = $workspaceShow.properties.discoveryUrl
-            }
-        }
-
-        return [ordered]@{
-            ProjectName = $projectName
-            ParentAccountName = $parentAccountName
-            ResourceGroup = $ResourceGroupName
-            ResourceId = $project.id
-            Endpoint = $projectEndpoint
-            Kind = $projectKind
-            Source = $projectSource
-        }
-    }
-
-    function Get-FoundryAccessToken {
-        Write-Log 'Requesting Azure AI Foundry access token via Azure CLI.'
-        $token = Invoke-AzJson -Arguments @('account', 'get-access-token', '--resource', 'https://ai.azure.com') -AllowFailure
-        if ($token -and $token.accessToken) {
-            return $token.accessToken
-        }
-
-        $tokenMgmt = Invoke-AzJson -Arguments @('account', 'get-access-token', '--resource-type', 'arm') -AllowFailure
-        if ($tokenMgmt -and $tokenMgmt.accessToken) {
-            return $tokenMgmt.accessToken
-        }
-
-        throw 'Unable to acquire a usable Azure AI Foundry access token.'
-    }
-
-    function Get-StorageUploadTarget {
-        param([string]$ResourceGroupName)
-
-        Write-Log "Discovering storage account and upload container in resource group $ResourceGroupName."
-        $accounts = Invoke-AzJson -Arguments @('storage', 'account', 'list', '--resource-group', $ResourceGroupName) -AllowFailure
-        if (-not $accounts -or $accounts.Count -eq 0) {
-            Write-Log 'No storage account was found in the lab resource group. Sample upload will be skipped.'
-            return $null
-        }
-
-        $storage = $accounts | Select-Object -First 1
-        $containers = Invoke-AzJson -Arguments @('storage', 'container', 'list', '--account-name', $storage.name, '--auth-mode', 'login') -AllowFailure
-        $targetContainer = $null
-
-        if ($containers -and $containers.Count -gt 0) {
-            $preferredNames = @('documents', 'samples', 'input', 'inputs', 'data', 'labdocs')
-            foreach ($preferredName in $preferredNames) {
-                $targetContainer = $containers | Where-Object { $_.name -eq $preferredName } | Select-Object -First 1
-                if ($targetContainer) {
-                    break
-                }
-            }
-
-            if (-not $targetContainer) {
-                $targetContainer = $containers | Select-Object -First 1
-            }
-        }
-        else {
-            $targetContainerName = 'documents'
-            $null = Invoke-AzJson -Arguments @('storage', 'container', 'create', '--account-name', $storage.name, '--name', $targetContainerName, '--auth-mode', 'login') -AllowFailure
-            $targetContainer = [pscustomobject]@{ name = $targetContainerName }
-        }
-
-        if (-not $targetContainer) {
-            return $null
-        }
-
-        $storageDetails = Invoke-AzJson -Arguments @('storage', 'account', 'show', '--name', $storage.name, '--resource-group', $ResourceGroupName)
-        return [ordered]@{
-            AccountName = $storage.name
-            ContainerName = $targetContainer.name
-            BlobEndpoint = $storageDetails.primaryEndpoints.blob
-            ResourceId = $storage.id
-        }
-    }
-
-    function Upload-SampleDocuments {
-        param([hashtable]$StorageTarget)
-
-        if (-not $StorageTarget) {
-            return
-        }
-
-        $documentsRoot = Join-Path $SamplesRoot 'Documents'
-        if (-not (Test-Path $documentsRoot)) {
-            Write-Log 'No sample documents directory exists. Skipping blob upload.'
-            return
-        }
-
-        Write-Log "Uploading sample documents from $documentsRoot to container $($StorageTarget.ContainerName) in account $($StorageTarget.AccountName)."
-        $azCmd = Get-AzCliPath
-        & $azCmd storage blob upload-batch --destination $StorageTarget.ContainerName --source $documentsRoot --account-name $StorageTarget.AccountName --auth-mode login --overwrite true --no-progress
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Failed to upload sample documents to blob storage.'
-        }
-    }
-
-    function Set-EnvValue {
-        param(
-            [Parameter(Mandatory = $true)]
-            [string]$Path,
-            [Parameter(Mandatory = $true)]
-            [string]$Key,
-            [AllowEmptyString()]
-            [string]$Value
-        )
-
-        $content = @()
-        if (Test-Path $Path) {
-            $content = Get-Content -Path $Path
-        }
-
-        $escapedKey = [Regex]::Escape($Key)
-        $newLine = "$Key=$Value"
-        $matched = $false
-        $updated = foreach ($line in $content) {
-            if ($line -match "^$escapedKey=") {
-                $matched = $true
-                $newLine
-            }
-            else {
-                $line
-            }
-        }
-
-        if (-not $matched) {
-            $updated += $newLine
-        }
-
-        Set-Content -Path $Path -Value $updated -Force
-    }
-
-    function Update-LabEnvFiles {
-        param(
-            [hashtable]$OpenAi,
-            [hashtable]$Foundry,
-            [string]$FoundryToken,
-            [hashtable]$StorageTarget,
-            [string]$ResourceGroupName
-        )
-
-        foreach ($envPath in $EnvPaths) {
-            Ensure-Directory -Path (Split-Path -Path $envPath -Parent)
-            if (-not (Test-Path $envPath)) {
-                New-Item -Path $envPath -ItemType File -Force | Out-Null
-            }
-
-            Set-EnvValue -Path $envPath -Key 'AZURE_OPENAI_ENDPOINT' -Value $OpenAi.Endpoint
-            Set-EnvValue -Path $envPath -Key 'AZURE_OPENAI_API_KEY' -Value $OpenAi.ApiKey
-            Set-EnvValue -Path $envPath -Key 'AZURE_OPENAI_DEPLOYMENT' -Value $OpenAi.DeploymentName
-            Set-EnvValue -Path $envPath -Key 'AZURE_OPENAI_RESOURCE_NAME' -Value $OpenAi.ResourceName
-            Set-EnvValue -Path $envPath -Key 'AZURE_OPENAI_RESOURCE_GROUP' -Value $OpenAi.ResourceGroup
-            Set-EnvValue -Path $envPath -Key 'AI_FOUNDRY_PROJECT_NAME' -Value $Foundry.ProjectName
-            Set-EnvValue -Path $envPath -Key 'AI_FOUNDRY_PROJECT_ID' -Value $Foundry.ResourceId
-            Set-EnvValue -Path $envPath -Key 'AI_FOUNDRY_PROJECT_ENDPOINT' -Value $Foundry.Endpoint
-            Set-EnvValue -Path $envPath -Key 'AI_FOUNDRY_ACCOUNT_NAME' -Value $Foundry.ParentAccountName
-            Set-EnvValue -Path $envPath -Key 'AI_FOUNDRY_TOKEN' -Value $FoundryToken
-            Set-EnvValue -Path $envPath -Key 'AZURE_RESOURCE_GROUP' -Value $ResourceGroupName
-
-            if ($StorageTarget) {
-                Set-EnvValue -Path $envPath -Key 'STORAGE_ACCOUNT_NAME' -Value $StorageTarget.AccountName
-                Set-EnvValue -Path $envPath -Key 'STORAGE_CONTAINER' -Value $StorageTarget.ContainerName
-                Set-EnvValue -Path $envPath -Key 'STORAGE_BLOB_ENDPOINT' -Value $StorageTarget.BlobEndpoint
-            }
+        catch {
+            Write-Log "Could not pre-create the Fabric connection automatically ($($_.Exception.Message)). This is non-fatal - Exercise 2 creates the connection manually if needed."
         }
     }
 
     function Write-LabStateSummary {
-        param(
-            [string]$ResourceGroupName,
-            [hashtable]$OpenAi,
-            [hashtable]$Foundry,
-            [hashtable]$StorageTarget
-        )
-
         $summary = [ordered]@{
-            DeploymentId = $DeploymentID
-            ODLId = $ODLID
-            AzureUserName = $AzureUserName
-            AzureTenantId = $AzureTenantID
-            AzureSubscriptionId = $AzureSubscriptionID
-            AzureResourceGroup = $ResourceGroupName
-            FabricPortal = 'https://app.fabric.microsoft.com'
-            WorkspaceNameHint = "contoso-fabric-$DeploymentID"
-            LakehouseName = 'ContosoOperationsLakehouse'
-            WarehouseName = 'ContosoOperationsWarehouse'
-            BronzeTable = 'bronze_orders_cdc'
-            SilverTable = 'silver_orders'
-            GoldDimension = 'dim_customer'
-            LabRoot = $LabRoot
-            AzureOpenAI = $OpenAi
-            AIFoundry = $Foundry
-            StorageUploadTarget = $StorageTarget
-            SourcesValidatedAgainst = @(
+            DeploymentId                = $DeploymentID
+            ODLId                       = $ODLID
+            AzureUserName               = $AzureUserName
+            AzureTenantId               = $AzureTenantID
+            AzureSubscriptionId         = $AzureSubscriptionID
+            FabricPortal                = 'https://app.fabric.microsoft.com'
+            WorkspaceNameHint           = "contoso-fabric-$DeploymentID"
+            LakehouseName               = 'contoso_medallion_lh'
+            WarehouseName               = 'contoso_gold_wh'
+            CopyJobName                 = 'orders-to-bronze-cdc'
+            PipelineName                = 'contoso-medallion-orchestration'
+            NotebookName                = 'nb_data_quality_gate'
+            BronzeTable                 = 'bronze_orders_cdc'
+            SilverTable                 = 'silver_orders'
+            GoldDimension               = 'dim_customer'
+            SqlServerFqdn               = $SqlServerFqdn
+            SqlDatabaseName             = $SqlDatabaseName
+            ValidationStorageAccount    = $ValidationStorageAccountName
+            ValidationContainer         = $ValidationContainerName
+            LabRoot                     = $LabRoot
+            SourcesValidatedAgainst     = @(
                 'https://learn.microsoft.com/fabric/data-science/python-guide/python-overview',
                 'https://learn.microsoft.com/fabric/data-engineering/fabric-notebook-selection-guide',
                 'https://learn.microsoft.com/fabric/data-factory/cdc-copy-job',
@@ -763,33 +658,43 @@ DESCRIBE HISTORY silver_orders;
                 'https://learn.microsoft.com/fabric/data-warehouse/dimensional-modeling-dimension-tables',
                 'https://learn.microsoft.com/fabric/data-engineering/delta-lake-time-travel',
                 'https://learn.microsoft.com/fabric/data-engineering/delta-lake-restore',
-                'https://learn.microsoft.com/fabric/data-engineering/delta-lake-clone',
-                'https://learn.microsoft.com/azure/ai-foundry/openai/how-to/create-resource#retrieve-information-about-the-resource',
-                'https://learn.microsoft.com/azure/foundry/how-to/create-projects#create-multiple-projects-on-the-same-resource',
-                'https://learn.microsoft.com/azure/foundry/how-to/develop/sdk-overview',
-                'https://learn.microsoft.com/azure/storage/blobs/storage-quickstart-blobs-cli#upload-a-blob'
+                'https://learn.microsoft.com/fabric/data-engineering/delta-lake-clone'
             )
         }
 
         $summary | ConvertTo-Json -Depth 6 | Set-Content -Path (Join-Path $LabRoot 'lab-state.json') -Force
     }
 
+    function Connect-AzureForLab {
+        Write-Log 'Authenticating Azure CLI with CloudLabs user credentials.'
+        $azCmd = (Get-Command az.cmd -ErrorAction SilentlyContinue).Source
+        if (-not $azCmd) { $azCmd = (Get-Command az -ErrorAction SilentlyContinue).Source }
+        if (-not $azCmd) { throw 'Azure CLI was not found after installation.' }
+
+        & $azCmd login -u $AzureUserName -p $AzurePassword --tenant $AzureTenantID | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Azure CLI login failed.'
+        }
+
+        & $azCmd account set --subscription $AzureSubscriptionID
+        if ($LASTEXITCODE -ne 0) {
+            throw 'Failed to set Azure subscription context.'
+        }
+    }
+
     CreateCredFile
     Ensure-TrainerAccount
     Install-LabTools
-    Initialize-LabContent
+    Initialize-LabFolders
+    Write-LabReadme
+    Write-LabEnvFile
+    Deploy-ContosoOperationsDatabase
+    Write-DesktopShortcuts
     Connect-AzureForLab
+    Register-FabricSqlConnection
+    Write-LabStateSummary
 
-    $resourceGroupName = Get-ResourceGroupForDeployment
-    $openAiDetails = Get-AzureOpenAiDetails -ResourceGroupName $resourceGroupName
-    $foundryDetails = Get-AiFoundryProjectDetails -ResourceGroupName $resourceGroupName
-    $foundryToken = Get-FoundryAccessToken
-    $storageTarget = Get-StorageUploadTarget -ResourceGroupName $resourceGroupName
-    Upload-SampleDocuments -StorageTarget $storageTarget
-    Update-LabEnvFiles -OpenAi $openAiDetails -Foundry $foundryDetails -FoundryToken $foundryToken -StorageTarget $storageTarget -ResourceGroupName $resourceGroupName
-    Write-LabStateSummary -ResourceGroupName $resourceGroupName -OpenAi $openAiDetails -Foundry $foundryDetails -StorageTarget $storageTarget
-
-    Write-Log 'Stage 1 Fabric challenge lab VM bootstrap completed successfully.'
+    Write-Log 'Fabric challenge lab VM bootstrap completed successfully.'
 }
 catch {
     Write-Error $_.Exception.Message

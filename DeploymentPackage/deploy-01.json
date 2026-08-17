@@ -23,7 +23,7 @@
     "DeploymentID": {
       "type": "string",
       "metadata": {
-        "description": "Unique deployment identifier used for resource naming."
+        "description": "Unique deployment identifier used for resource naming. Must be at least 12 characters once hyphens are removed - it is used verbatim by the Lab Guide and by Validations/*.ps1 to compute the validation storage account name."
       }
     },
     "adminUsername": {
@@ -50,11 +50,17 @@
         "description": "Trainer/local support account password for VM Shadow access."
       }
     },
-    "openAiDeploymentName": {
+    "sqlAdminUsername": {
       "type": "string",
-      "defaultValue": "gpt-4o-mini",
+      "defaultValue": "cdqadmin",
       "metadata": {
-        "description": "Azure OpenAI deployment name exposed to learners."
+        "description": "Administrator login for the Contoso_Operations Azure SQL logical server."
+      }
+    },
+    "sqlAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Administrator password for the Contoso_Operations Azure SQL logical server."
       }
     }
   },
@@ -67,13 +73,12 @@
     "pipName": "[concat('pip-', toLower(parameters('DeploymentID')))]",
     "nicName": "[concat('nic-', toLower(parameters('DeploymentID')))]",
     "dnsLabel": "[toLower(concat('cl', uniqueString(resourceGroup().id, parameters('DeploymentID'))))]",
-    "openAiAccountName": "[tolower(concat('aoai', uniqueString(subscription().subscriptionId, resourceGroup().id, parameters('DeploymentID'))))]",
-    "aiHubName": "[substring(concat('hub', uniqueString(resourceGroup().id, parameters('DeploymentID'))), 0, 16)]",
-    "aiProjectName": "[substring(concat('proj', uniqueString(subscription().subscriptionId, parameters('DeploymentID'))), 0, 16)]",
-    "storageAccountName": "[substring(toLower(concat('st', uniqueString(resourceGroup().id, parameters('DeploymentID')))), 0, 24)]",
-    "keyVaultName": "[substring(concat('kv-', uniqueString(subscription().tenantId, resourceGroup().id, parameters('DeploymentID'))), 0, 24)]",
-    "appInsightsName": "[substring(concat('appi-', uniqueString(resourceGroup().id, parameters('DeploymentID'))), 0, 24)]",
-    "containerRegistryName": "[substring(toLower(concat('cr', uniqueString(subscription().subscriptionId, resourceGroup().id, parameters('DeploymentID')))), 0, 50)]"
+    "deploymentIdNoHyphens": "[replace(toLower(parameters('DeploymentID')), '-', '')]",
+    "storageAccountName": "[concat('stfabricval', substring(variables('deploymentIdNoHyphens'), 0, 12))]",
+    "validationContainerName": "validation",
+    "sqlServerName": "[concat('sql-cdq-', toLower(parameters('DeploymentID')))]",
+    "sqlDatabaseName": "Contoso_Operations",
+    "sqlServerFqdn": "[concat(variables('sqlServerName'), '.database.windows.net')]"
   },
   "resources": [
     {
@@ -189,141 +194,67 @@
       }
     },
     {
-      "type": "Microsoft.KeyVault/vaults",
-      "apiVersion": "2023-07-01",
-      "name": "[variables('keyVaultName')]",
-      "location": "[resourceGroup().location]",
-      "properties": {
-        "tenantId": "[subscription().tenantId]",
-        "sku": {
-          "family": "A",
-          "name": "standard"
-        },
-        "enableRbacAuthorization": true,
-        "enableSoftDelete": true,
-        "enabledForDeployment": false,
-        "enabledForDiskEncryption": false,
-        "enabledForTemplateDeployment": false,
-        "publicNetworkAccess": "Enabled",
-        "accessPolicies": []
-      }
-    },
-    {
-      "type": "Microsoft.Insights/components",
-      "apiVersion": "2020-02-02",
-      "name": "[variables('appInsightsName')]",
-      "location": "[resourceGroup().location]",
-      "kind": "web",
-      "properties": {
-        "Application_Type": "web",
-        "publicNetworkAccessForIngestion": "Enabled",
-        "publicNetworkAccessForQuery": "Enabled"
-      }
-    },
-    {
-      "type": "Microsoft.ContainerRegistry/registries",
-      "apiVersion": "2023-07-01",
-      "name": "[variables('containerRegistryName')]",
-      "location": "[resourceGroup().location]",
-      "sku": {
-        "name": "Basic"
-      },
-      "properties": {
-        "adminUserEnabled": true,
-        "publicNetworkAccess": "Enabled"
-      }
-    },
-    {
-      "type": "Microsoft.CognitiveServices/accounts",
-      "apiVersion": "2025-06-01",
-      "name": "[variables('openAiAccountName')]",
-      "location": "[resourceGroup().location]",
-      "kind": "OpenAI",
-      "sku": {
-        "name": "S0"
-      },
-      "properties": {
-        "customSubDomainName": "[variables('openAiAccountName')]",
-        "publicNetworkAccess": "Enabled"
-      }
-    },
-    {
-      "type": "Microsoft.CognitiveServices/accounts/deployments",
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
       "apiVersion": "2023-05-01",
-      "name": "[concat(variables('openAiAccountName'), '/', parameters('openAiDeploymentName'))]",
+      "name": "[concat(variables('storageAccountName'), '/default/', variables('validationContainerName'))]",
       "dependsOn": [
-        "[resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
       ],
-      "sku": {
-        "name": "Standard",
-        "capacity": 10
-      },
       "properties": {
-        "model": {
-          "format": "OpenAI",
-          "name": "gpt-4o-mini",
-          "version": "2024-07-18"
-        }
+        "publicAccess": "None"
       }
     },
     {
-      "type": "Microsoft.MachineLearningServices/workspaces",
-      "apiVersion": "2023-10-01",
-      "name": "[variables('aiHubName')]",
-      "kind": "Hub",
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[variables('sqlServerName')]",
       "location": "[resourceGroup().location]",
-      "identity": {
-        "type": "SystemAssigned"
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-        "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
-        "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]"
-      ],
-      "sku": {
-        "name": "Basic",
-        "tier": "Basic"
-      },
       "properties": {
-        "friendlyName": "Azure AI Foundry Hub",
-        "description": "Hub workspace for the self-contained CloudLabs AI dependencies.",
-        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-        "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
-        "containerRegistry": "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
-        "publicNetworkAccess": "Enabled",
-        "allowPublicAccessWhenBehindVnet": true,
-        "v1LegacyMode": false
+        "administratorLogin": "[parameters('sqlAdminUsername')]",
+        "administratorLoginPassword": "[parameters('sqlAdminPassword')]",
+        "version": "12.0",
+        "publicNetworkAccess": "Enabled"
       }
     },
     {
-      "type": "Microsoft.MachineLearningServices/workspaces",
-      "apiVersion": "2023-10-01",
-      "name": "[variables('aiProjectName')]",
-      "kind": "Project",
+      "type": "Microsoft.Sql/servers/databases",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/', variables('sqlDatabaseName'))]",
       "location": "[resourceGroup().location]",
-      "identity": {
-        "type": "SystemAssigned"
-      },
       "dependsOn": [
-        "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
       ],
       "sku": {
-        "name": "Basic",
-        "tier": "Basic"
+        "name": "S0",
+        "tier": "Standard"
       },
       "properties": {
-        "friendlyName": "Azure AI Foundry Project",
-        "description": "Project workspace associated with the Azure AI Foundry hub for this lab.",
-        "storageAccount": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "keyVault": "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
-        "applicationInsights": "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
-        "containerRegistry": "[resourceId('Microsoft.ContainerRegistry/registries', variables('containerRegistryName'))]",
-        "publicNetworkAccess": "Enabled",
-        "allowPublicAccessWhenBehindVnet": true,
-        "v1LegacyMode": false,
-        "hubResourceId": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
+        "collation": "SQL_Latin1_General_CP1_CI_AS"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/AllowAllWindowsAzureIps')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/Allow-Lab-VM')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress]",
+        "endIpAddress": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress]"
       }
     },
     {
@@ -377,12 +308,37 @@
       }
     },
     {
+      "type": "Microsoft.DevTestLab/schedules",
+      "apiVersion": "2018-09-15",
+      "name": "[concat('shutdown-computevm-', variables('LabVMName'))]",
+      "location": "[resourceGroup().location]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
+      ],
+      "properties": {
+        "status": "Enabled",
+        "taskType": "ComputeVmShutdownTask",
+        "dailyRecurrence": {
+          "time": "1900"
+        },
+        "timeZoneId": "UTC",
+        "notificationSettings": {
+          "status": "Disabled",
+          "timeInMinutes": 30
+        },
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
+      }
+    },
+    {
       "type": "Microsoft.Compute/virtualMachines/extensions",
       "apiVersion": "2022-11-01",
       "name": "[concat(variables('LabVMName'), '/bootstrap')]",
       "location": "[resourceGroup().location]",
       "dependsOn": [
-        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]",
+        "[resourceId('Microsoft.Sql/servers/databases', variables('sqlServerName'), variables('sqlDatabaseName'))]",
+        "[resourceId('Microsoft.Sql/servers/firewallRules', variables('sqlServerName'), 'AllowAllWindowsAzureIps')]",
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageAccountName'), 'default', variables('validationContainerName'))]"
       ],
       "properties": {
         "publisher": "Microsoft.Compute",
@@ -395,7 +351,7 @@
           ]
         },
         "protectedSettings": {
-          "commandToExecute": "[concat('powershell -ExecutionPolicy Bypass -File psscript-01.ps1 -AzureUserName \"', parameters('azureUserName'), '\" -AzurePassword \"', parameters('azurePassword'), '\" -AzureTenantID \"', subscription().tenantId, '\" -AzureSubscriptionID \"', subscription().subscriptionId, '\" -ODLID \"', parameters('ODLID'), '\" -DeploymentID \"', parameters('DeploymentID'), '\" -vmAdminUsername \"', parameters('adminUsername'), '\" -vmAdminPassword \"', parameters('adminPassword'), '\" -trainerUserName \"', parameters('trainerUserName'), '\" -trainerUserPassword \"', parameters('trainerUserPassword'), '\"')]"
+          "commandToExecute": "[concat('powershell -ExecutionPolicy Bypass -File psscript-01.ps1 -AzureUserName \"', parameters('azureUserName'), '\" -AzurePassword \"', parameters('azurePassword'), '\" -AzureTenantID \"', subscription().tenantId, '\" -AzureSubscriptionID \"', subscription().subscriptionId, '\" -ODLID \"', parameters('ODLID'), '\" -InstallCloudLabsShadow \"true\" -DeploymentID \"', parameters('DeploymentID'), '\" -vmAdminUsername \"', parameters('adminUsername'), '\" -vmAdminPassword \"', parameters('adminPassword'), '\" -trainerUserName \"', parameters('trainerUserName'), '\" -trainerUserPassword \"', parameters('trainerUserPassword'), '\" -SqlServerFqdn \"', variables('sqlServerFqdn'), '\" -SqlDatabaseName \"', variables('sqlDatabaseName'), '\" -SqlAdminUsername \"', parameters('sqlAdminUsername'), '\" -SqlAdminPassword \"', parameters('sqlAdminPassword'), '\"')]"
         }
       }
     }
@@ -421,37 +377,21 @@
       "type": "string",
       "value": "[parameters('trainerUserPassword')]"
     },
-    "AzureOpenAIAccountName": {
+    "sqlServerFqdn": {
       "type": "string",
-      "value": "[variables('openAiAccountName')]"
+      "value": "[variables('sqlServerFqdn')]"
     },
-    "AzureOpenAIEndpoint": {
+    "sqlDatabaseName": {
       "type": "string",
-      "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName')), '2025-06-01').properties.endpoint]"
+      "value": "[variables('sqlDatabaseName')]"
     },
-    "AzureOpenAIApiKey": {
+    "validationStorageAccountName": {
       "type": "string",
-      "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', variables('openAiAccountName')), '2025-06-01').key1]"
+      "value": "[variables('storageAccountName')]"
     },
-    "AzureOpenAIDeploymentName": {
+    "validationContainerName": {
       "type": "string",
-      "value": "[parameters('openAiDeploymentName')]"
-    },
-    "AzureAIFoundryHubName": {
-      "type": "string",
-      "value": "[variables('aiHubName')]"
-    },
-    "AzureAIFoundryHubResourceId": {
-      "type": "string",
-      "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiHubName'))]"
-    },
-    "AzureAIFoundryProjectName": {
-      "type": "string",
-      "value": "[variables('aiProjectName')]"
-    },
-    "AzureAIFoundryProjectResourceId": {
-      "type": "string",
-      "value": "[resourceId('Microsoft.MachineLearningServices/workspaces', variables('aiProjectName'))]"
+      "value": "[variables('validationContainerName')]"
     }
   }
 }

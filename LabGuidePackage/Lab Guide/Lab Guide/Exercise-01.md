@@ -28,7 +28,7 @@ In this task, you will sign in with the lab account, open Microsoft Fabric, and 
 3. In a new browser tab, open the Microsoft Fabric portal at <https://app.fabric.microsoft.com>.
 4. If prompted, sign in with the same lab account.
 5. In the left navigation menu, select **Workspaces**.
-6. Select **+ New workspace** or **New workspace**.
+6. Select **+ New workspace** (labeled just **New workspace** in some Fabric versions).
 7. In the **Create a workspace** pane, enter **contoso-fabric-<inject key="DeploymentID"></inject>** as the workspace name.
 8. Optionally, enter a short description such as **Workspace for the Contoso medallion challenge lab**.
 9. Expand **Advanced** if the option is available.

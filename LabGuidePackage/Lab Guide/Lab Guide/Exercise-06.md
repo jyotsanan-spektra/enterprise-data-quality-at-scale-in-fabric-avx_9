@@ -25,13 +25,13 @@ In this task, you will create the pipeline canvas and add the activities that re
    - Username: <inject key="AzureAdUserEmail"></inject>
    - Password: <inject key="AzureAdUserPassword"></inject>
 3. Open the workspace that you used throughout this lab.
-4. Confirm the following six learner-created items are available in the workspace before you build the orchestration, using the exact names below:
+4. Confirm the following four Fabric items, plus one Warehouse stored procedure, are available before you build the orchestration:
    - **contoso_medallion_lh** — the Lakehouse containing `bronze_orders_cdc` and `silver_orders` (Challenges 1, 2, 4)
-   - **contoso_gold_wh** — the Warehouse containing `dim_customer` and the `usp_process_customer_changes` stored procedure (Challenges 1, 3)
+   - **contoso_gold_wh** — the Warehouse containing `dim_customer` (Challenges 1, 3)
    - **orders-to-bronze-cdc** — the Copy job that ingests into `bronze_orders_cdc` (Challenge 2)
    - **nb_data_quality_gate** — the notebook that gates Bronze-to-Silver promotion (Challenge 4)
-   - `usp_process_customer_changes` — the stored procedure in `contoso_gold_wh` that applies SCD Type 2 changes (Challenge 3, Task 3, step 11)
-5. In the workspace, open the pipeline item you created in Challenge 1 (**contoso-medallion-orchestration**) rather than creating a new one.
+   - `usp_process_customer_changes` — the stored procedure inside `contoso_gold_wh` that applies SCD Type 2 changes (Challenge 3, Task 3, step 11)
+5. In the workspace, open the pipeline item you created in Challenge 1 (**contoso-medallion-orchestration**) — this is the fifth Fabric item, and the one you build the orchestration into — rather than creating a new one.
    - If that item does not exist yet, select **+ New item**, search for **Data pipeline**, select it, and name the new pipeline **contoso-medallion-orchestration**.
 6. On the pipeline canvas, add the first activity that represents the Bronze ingestion step. Add the activity type that invokes an existing Copy job item — depending on your Fabric version this appears either as a native **Copy job** activity or as an activity that references an existing item by name. Configure it to run the **orders-to-bronze-cdc** Copy job you created in Challenge 2, rather than rebuilding a new Copy data activity from scratch.
 7. Rename the first activity to **Bronze CDC ingestion**.
@@ -63,7 +63,7 @@ In this task, you will make the orchestration resilient to transient activity fa
 2. In the properties pane, open the **General** tab.
 3. Turn on **Enable retries**.
 4. Set **Retry** to **1**.
-5. Leave **Retry interval (sec)** at **30** unless your instructor specifies a different value.
+5. Leave **Retry interval (sec)** at **30**.
 6. If the retry settings in your Fabric environment expose **Retry conditions (preview)**, configure them only for transient failures that should be retried.
 7. Do not configure retries in a way that masks known bad-data failures from the quality notebook — the notebook raises an explicit exception on a failed gate (Challenge 4, Task 2, step 10), and a retry against the same bad Bronze data will fail again for the same reason, which is the correct, expected behavior.
 8. Return to the pipeline canvas and review the success dependency between the quality gate and the Gold load.
@@ -71,7 +71,7 @@ In this task, you will make the orchestration resilient to transient activity fa
 10. Add a failure branch from **Bronze to Silver quality gate**.
 11. For the failure branch, add a control-flow activity that records a clear failure outcome.
     - If **Fail** is available in your activity list, use it and enter a meaningful error message such as `Quality gate failed. Downstream Gold processing was blocked.`
-    - If your workspace uses another approved evidence step, use that step to capture the failure path while still leaving the run visibly failed in Fabric monitoring.
+    - If **Fail** is not available in your environment, add a **Set variable** activity instead to record the failure text, but confirm the overall pipeline run still shows as **Failed** in Fabric monitoring — a **Set variable** activity alone succeeds, so pair it with the upstream failed activity to keep the run status accurate.
 12. Rename the failure-path activity to **Quality failure evidence**.
 13. Save the pipeline.
 14. Select **View run history** or open the **Monitor** hub and verify that the pipeline is ready to expose per-activity status, inputs, outputs, and errors after execution.
@@ -93,27 +93,44 @@ In this task, you will test the orchestration twice and collect the evidence req
    - **Bronze to Silver quality gate** completed successfully.
    - **Gold dimension load** completed successfully.
 7. Open the activity details for each of the three activities and review the available **Input**, **Output**, and status information for the successful run.
-8. Run `SELECT COUNT(*) FROM dim_customer;` against `contoso_gold_wh` and confirm the count reflects the SCD Type 2 processing from `usp_process_customer_changes` (5,200 if this is the first time the procedure has run against unprocessed staging data, or unchanged if Challenge 3 already processed it).
-9. Save the success run evidence as a JSON file named **pipeline-success.json** in `C:\LabFiles\validation`, following the same pattern used for the JSON evidence files in Challenge 5:
+8. Run `SELECT COUNT(*) FROM dim_customer;` against `contoso_gold_wh` and confirm the count reflects the SCD Type 2 processing from `usp_process_customer_changes` (5,200 if this is the first time the procedure has run against unprocessed staging data, or unchanged if Challenge 3 already ran it against the same staging data — the procedure only updates or inserts rows whose staged values differ from the current dimension row, so re-running it here is safe and does not create duplicate versions).
+9. On the lab VM, open PowerShell and save the success run evidence. Set each activity's `status` to the status you actually saw in the run history:
 
-   ```python
-   import json
-   import os
+   ```powershell
+   New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
 
-   pipeline_success_evidence = {
-       "pipelineName": "contoso-medallion-orchestration",
-       "runStatus": "Succeeded",
-       "activities": ["Bronze CDC ingestion", "Bronze to Silver quality gate", "Gold dimension load"]
-   }
+   [ordered]@{
+       pipelineName     = 'contoso-medallion-orchestration'
+       pipelineRunStatus = 'Succeeded'
+       activities = @(
+           [ordered]@{ activityName = 'Bronze CDC ingestion';          status = 'Succeeded' }
+           [ordered]@{ activityName = 'Bronze to Silver quality gate'; status = 'Succeeded' }
+           [ordered]@{ activityName = 'Gold dimension load';           status = 'Succeeded' }
+       )
+   } | ConvertTo-Json -Depth 5 | Set-Content 'C:\LabFiles\validation\pipeline-success.json' -Encoding utf8
 
-   output_path = r"C:\LabFiles\validation\pipeline-success.json"
-   os.makedirs(os.path.dirname(output_path), exist_ok=True)
-   with open(output_path, "w", encoding="utf-8") as f:
-       json.dump(pipeline_success_evidence, f, indent=2)
-   print(f"Saved {output_path}")
+   Get-Content 'C:\LabFiles\validation\pipeline-success.json'
    ```
 
-10. Reintroduce the controlled quality-defect scenario from Challenge 4, Task 3 so the quality notebook fails — load `quality_defect.csv` into a location the notebook activity will check, matching however you triggered the failure in Challenge 4.
+   > [!Important]
+   > Create this file from a PowerShell window on the lab VM, not from a Fabric notebook. Notebooks run on remote Spark compute and cannot write to this VM's `C:\LabFiles` folder.
+
+10. Reintroduce the controlled quality-defect scenario from Challenge 4 so the quality notebook fails during an automated pipeline run. In Challenge 4, Task 3 you tested the defect rows in separate, manually run cells — that proved the check logic works, but the pipeline's **Bronze to Silver quality gate** activity runs the whole notebook non-interactively, and the notebook's real gate logic (Challenge 4, Task 2) reads from `bronze_orders_cdc`, not from `quality_defect.csv` directly. To make the automated run fail for real, append the 10 defective rows into `bronze_orders_cdc` itself:
+    - In the notebook, add a new cell and run:
+
+      ```python
+      from pyspark.sql import functions as F
+
+      # Cast every column to the Bronze table's own schema so the append cannot fail on a type mismatch.
+      bronze_schema = spark.table("bronze_orders_cdc").schema
+
+      defect_df = spark.read.option("header", True).csv("Files/quality_defect.csv") \
+          .select(*[F.col(field.name).cast(field.dataType).alias(field.name) for field in bronze_schema])
+
+      defect_df.write.format("delta").mode("append").saveAsTable("bronze_orders_cdc")
+      ```
+
+    - Run `SELECT COUNT(*) FROM bronze_orders_cdc WHERE OrderID IS NULL;` and confirm it returns **10**, proving the defect rows are now part of the live Bronze table that the pipeline will read.
 11. Run the same pipeline again.
 12. Open the new run in **View run history** or the **Monitor** hub.
 13. Confirm that:
@@ -121,9 +138,42 @@ In this task, you will test the orchestration twice and collect the evidence req
     - The failure path (**Quality failure evidence**) executed, or the run was clearly marked failed.
     - The downstream **Gold dimension load** activity did not complete successfully.
 14. Review the failed run details and record the activity status, error text, and branch behavior for the quality gate activity.
-15. Save the failure run evidence as a JSON file named **pipeline-failure.json** in `C:\LabFiles\validation`, following the same pattern as step 9.
-16. Upload both evidence files to the **validation** container in the validation storage account associated with your deployment, using the same PowerShell pattern from Challenge 5, Task 3, step 5 (substitute `pipeline-success.json` and `pipeline-failure.json` for the filenames in the `@()` array).
-17. Confirm both files uploaded by running `Get-AzStorageBlob -Context $ctx -Container $containerName | Select-Object Name` and checking that both filenames appear in the output, alongside the three files from Challenge 5.
+15. In PowerShell on the lab VM, save the failure run evidence. The **Gold dimension load** entry must show a non-success status, because a blocked quality gate must stop downstream Gold processing:
+
+    ```powershell
+    [ordered]@{
+        pipelineName      = 'contoso-medallion-orchestration'
+        pipelineRunStatus = 'Failed'
+        activities = @(
+            [ordered]@{ activityName = 'Bronze CDC ingestion';          status = 'Succeeded' }
+            [ordered]@{ activityName = 'Bronze to Silver quality gate'; status = 'Failed' }
+            [ordered]@{ activityName = 'Gold dimension load';           status = 'Skipped' }
+        )
+    } | ConvertTo-Json -Depth 5 | Set-Content 'C:\LabFiles\validation\pipeline-failure.json' -Encoding utf8
+
+    Get-Content 'C:\LabFiles\validation\pipeline-failure.json'
+    ```
+
+16. Upload both evidence files to the **validation** container:
+
+    ```powershell
+    $envMap = @{}
+    Get-Content 'C:\LabFiles\.env' | ForEach-Object {
+        if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
+    }
+
+    if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
+
+    $resourceGroup = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
+    $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $envMap['VALIDATION_STORAGE_ACCOUNT']).Context
+
+    @('pipeline-success.json', 'pipeline-failure.json') | ForEach-Object {
+        Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+            -File (Join-Path 'C:\LabFiles\validation' $_) -Blob $_ -Force | Out-Null
+    }
+    ```
+
+17. Confirm both files uploaded by running `Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name` and checking that both filenames appear in the output, alongside the evidence files from the earlier challenges.
 18. Record the deployment context in your notes: **Deployment ID: <inject key="DeploymentID" enableCopy="false"/>**.
 
 <validation step="Validate orchestration success/failure run states and dependency behavior using internal pipeline evidence."/>
