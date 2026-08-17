@@ -65,7 +65,7 @@
     },
     "bootstrapScriptUrl": {
       "type": "string",
-      "defaultValue": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/b2928a52d1a8890987563aee55f26700cde7695c/DeploymentPackage/psscript-01.ps1",
+      "defaultValue": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/1b9c823a9d89b29bcefb26bc282f56c8c02a9a33/DeploymentPackage/psscript-01.ps1",
       "metadata": {
         "description": "URL the Custom Script Extension downloads psscript-01.ps1 from. This MUST serve the same version of the script as DeploymentPackage/psscript-01.ps1 in this repo, because the template passes SQL parameters that older copies of the script do not declare. The default is pinned to a commit SHA so it is reproducible and immune to raw.githubusercontent.com branch caching - if you change psscript-01.ps1, bump this SHA to the new commit. Override it to a CloudLabs-hosted blob once that copy has been republished."
       }
