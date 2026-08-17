@@ -94,22 +94,23 @@ In this task, you will create the remaining Fabric items that support Spark vali
 In this task, you will map each created item to the medallion design and confirm the environment is ready for downstream implementation.
 
 1. Confirm that your new workspace is the container for all Fabric items you will build in this lab.
-2. Open **contoso_medallion_lh** and confirm that it will be used for the Bronze and Silver Delta tables in this lab.
-3. In your notes, map the future `bronze_orders_cdc` table to the Bronze layer in the Lakehouse.
-4. In your notes, map the future `silver_orders` table to the Silver layer in the same Lakehouse.
-5. Open **contoso_gold_wh** and confirm that it will be used for the Gold-layer dimensional model, including the customer dimension that will track historical changes.
-6. Open **nb_data_quality_gate** and confirm that this notebook will later hold the PySpark logic that checks null handling, ranges, referential integrity, freshness, and schema expectations before Silver promotion.
-7. Open **orders-to-bronze-cdc** and confirm that this item will later ingest data from the prepared Contoso_Operations source into the Bronze layer.
-8. Open **contoso-medallion-orchestration** and confirm that this pipeline will later orchestrate ingestion, quality validation, Gold loading, and success or failure branches.
-9. Review the overall medallion flow and confirm that each major requirement from the scenario now has a matching learner-created Fabric item:
+2. Open **contoso_medallion_lh** and confirm that it will be used for the Bronze and Silver Delta tables in this lab. Neither `bronze_orders_cdc` nor `silver_orders` exists yet — Challenges 2 and 4 create them.
+3. Open `C:\LabFiles\fabric-item-names.txt` (the notes file you started in Task 2) and add these two lines so the layer mapping is recorded before you build it:
+   - `bronze_orders_cdc -> Bronze layer table in contoso_medallion_lh (created in Challenge 2)`
+   - `silver_orders -> Silver layer table in contoso_medallion_lh (created in Challenge 4)`
+4. Open **contoso_gold_wh** and confirm that it will be used for the Gold-layer dimensional model, including the customer dimension that will track historical changes.
+5. Open **nb_data_quality_gate** and confirm that this notebook will later hold the PySpark logic that checks null handling, ranges, referential integrity, freshness, and schema expectations before Silver promotion.
+6. Open **orders-to-bronze-cdc** and confirm that this item will later ingest data from the prepared Contoso_Operations source into the Bronze layer.
+7. Open **contoso-medallion-orchestration** and confirm that this pipeline will later orchestrate ingestion, quality validation, Gold loading, and success or failure branches.
+8. Review the overall medallion flow and confirm that each major requirement from the scenario now has a matching learner-created Fabric item:
    - Workspace container for the lab solution
    - Bronze ingestion
    - Silver quality gate
    - Gold history tracking
    - Delta audit and recovery operations
    - End-to-end orchestration
-10. Verify that you can open each item without errors.
-11. Keep your recorded item names available for the later challenges.
+9. Verify that you can open each item without errors.
+10. Keep your recorded item names available for the later challenges.
 
 <validation step="Validate prerequisite environment readiness and required Fabric object baseline for the medallion scenario."/>
 
