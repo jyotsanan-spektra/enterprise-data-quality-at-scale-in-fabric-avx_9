@@ -20,11 +20,17 @@ Param(
     [Parameter(Mandatory = $true)]
     [string]$DeploymentID,
 
+    # Passed by the template's cloudlabsCommon argument string.
+    [Parameter(Mandatory = $false)]
+    [string]$azuserobjectid = '',
+
     [Parameter(Mandatory = $true)]
     [string]$vmAdminUsername,
 
-    [Parameter(Mandatory = $true)]
-    [string]$vmAdminPassword,
+    # Not supplied by the template's Enable-CloudLabsEmbeddedShadow argument string, so this must
+    # stay optional or the Custom Script Extension fails on parameter binding.
+    [Parameter(Mandatory = $false)]
+    [string]$vmAdminPassword = '',
 
     [Parameter(Mandatory = $true)]
     [string]$trainerUserName,

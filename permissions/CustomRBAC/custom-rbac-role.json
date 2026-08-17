@@ -10,6 +10,7 @@
     "Microsoft.Storage/storageAccounts/*",
     "Microsoft.Sql/servers/*",
     "Microsoft.DevTestLab/schedules/*",
+    "Microsoft.ManagedIdentity/userAssignedIdentities/*",
     "Microsoft.Insights/*",
     "Microsoft.Authorization/*/read"
   ],

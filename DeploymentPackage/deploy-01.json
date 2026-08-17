@@ -1,154 +1,142 @@
 {
-  "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "azureUserName": {
-      "type": "string",
-      "metadata": {
-        "description": "Azure AD user UPN provided by CloudLabs."
-      }
+    "AzureUserName": {
+      "type": "string"
     },
-    "azurePassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Azure AD user password provided by CloudLabs."
-      }
-    },
-    "ODLID": {
-      "type": "string",
-      "metadata": {
-        "description": "CloudLabs ODL identifier."
-      }
+    "AzurePassword": {
+      "type": "securestring"
     },
     "DeploymentID": {
-      "type": "string",
-      "metadata": {
-        "description": "Unique deployment identifier used for resource naming. The validation storage account name is derived from it as 'stfabricval' plus up to the first 12 characters (hyphens removed, lowercased). Validations/*.ps1 and the VM bootstrap derive the same name, so keep those three formulas in sync."
-      }
+      "type": "string"
     },
-    "adminUsername": {
-      "type": "string",
-      "metadata": {
-        "description": "Local administrator username for the lab VM."
-      }
+    "ODLID": {
+      "type": "string"
     },
-    "adminPassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Local administrator password for the lab VM."
-      }
+    "diskStorageType": {
+      "defaultValue": "StandardSSD_LRS",
+      "type": "string"
+    },
+    "vmAdminUsername": {
+      "type": "string"
+    },
+    "vmAdminPassword": {
+      "type": "SecureString"
+    },
+    "azuserobjectid": {
+      "type": "string"
+    },
+    "ServicePrincipalClientId": {
+      "type": "string"
+    },
+    "ClientSecret": {
+      "type": "string"
     },
     "trainerUserName": {
-      "type": "string",
-      "metadata": {
-        "description": "Trainer/local support account username for VM Shadow access."
-      }
+      "type": "string"
     },
     "trainerUserPassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Trainer/local support account password for VM Shadow access."
-      }
+      "type": "string"
     },
     "sqlAdminUsername": {
-      "type": "string",
       "defaultValue": "cdqadmin",
-      "metadata": {
-        "description": "Administrator login for the Contoso_Operations Azure SQL logical server."
-      }
+      "type": "string"
     },
     "sqlAdminPassword": {
-      "type": "securestring",
-      "metadata": {
-        "description": "Administrator password for the Contoso_Operations Azure SQL logical server."
-      }
-    },
-    "bootstrapScriptUrl": {
-      "type": "string",
-      "defaultValue": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/1b9c823a9d89b29bcefb26bc282f56c8c02a9a33/DeploymentPackage/psscript-01.ps1",
-      "metadata": {
-        "description": "URL the Custom Script Extension downloads psscript-01.ps1 from. This MUST serve the same version of the script as DeploymentPackage/psscript-01.ps1 in this repo, because the template passes SQL parameters that older copies of the script do not declare. The default is pinned to a commit SHA so it is reproducible and immune to raw.githubusercontent.com branch caching - if you change psscript-01.ps1, bump this SHA to the new commit. Override it to a CloudLabs-hosted blob once that copy has been republished."
-      }
+      "type": "securestring"
     }
   },
   "variables": {
-    "scripturl": "[parameters('bootstrapScriptUrl')]",
-    "LabVMName": "[concat('labvm-', toLower(parameters('DeploymentID')))]",
-    "vnetName": "[concat('vnet-', toLower(parameters('DeploymentID')))]",
-    "subnetName": "default",
-    "nsgName": "[concat('nsg-', toLower(parameters('DeploymentID')))]",
-    "pipName": "[concat('pip-', toLower(parameters('DeploymentID')))]",
-    "nicName": "[concat('nic-', toLower(parameters('DeploymentID')))]",
-    "dnsLabel": "[toLower(concat('cl', uniqueString(resourceGroup().id, parameters('DeploymentID'))))]",
+    "cloudlabsCommon": "[concat(' -AzureUserName ', parameters('AzureUserName'), ' -AzurePassword ', parameters('AzurePassword'), ' -AzureTenantID ', variables('AzureTenantID'), ' -AzureSubscriptionID ', variables('AzureSubscriptionID'), ' -ODLID ', parameters('ODLID'), ' -DeploymentID ', parameters('DeploymentID'),' -azuserobjectid ', parameters('azuserobjectid'))]",
+    "Enable-CloudLabsEmbeddedShadow": "[concat(' -vmAdminUsername ', parameters('vmAdminUsername'), ' -trainerUserName ', parameters('trainerUserName'), ' -trainerUserPassword ', parameters('trainerUserPassword'))]",
+    "labSpecific": "[concat(' -SqlServerFqdn ', variables('sqlServerFqdn'), ' -SqlDatabaseName ', variables('sqlDatabaseName'), ' -SqlAdminUsername ', parameters('sqlAdminUsername'), ' -SqlAdminPassword ', parameters('sqlAdminPassword'))]",
+    "AzureSubscriptionID": "[subscription().subscriptionId]",
+    "AzureTenantID": "[subscription().tenantId]",
+    "location": "[resourceGroup().location]",
+    "subnetPrefix": "10.0.0.0/24",
+    "addressPrefix": "10.0.0.0/16",
+    "jumphost": "[concat('labvm-',parameters('DeploymentID'))]",
+    "networkInterfaceName1": "[concat(variables('jumphost'), '-nic')]",
+    "virtualNetworkName1": "labvm-vnet1",
+    "subnetName1": "Subnet1",
+    "virtualMachineSize": "Standard_B2ms",
+    "vnetId1": "[resourceId(resourceGroup().name,'Microsoft.Network/virtualNetworks', variables('virtualNetworkName1'))]",
+    "subnetRef1": "[concat(variables('vnetId1'), '/subnets/', variables('subnetName1'))]",
+    "publicIpAddressName1": "[concat(variables('jumphost'), '-pip')]",
+    "vmPublicIpDnsName": "[concat('labvm',uniqueString(resourceGroup().id))]",
+    "networkSecurityGroupName1": "[concat(variables('jumphost'), '-nsg')]",
     "deploymentIdNoHyphens": "[replace(toLower(parameters('DeploymentID')), '-', '')]",
     "storageAccountName": "[concat('stfabricval', substring(variables('deploymentIdNoHyphens'), 0, min(12, length(variables('deploymentIdNoHyphens')))))]",
     "validationContainerName": "validation",
     "sqlServerName": "[concat('sql-cdq-', toLower(parameters('DeploymentID')))]",
     "sqlDatabaseName": "Contoso_Operations",
-    "sqlServerFqdn": "[concat(variables('sqlServerName'), '.database.windows.net')]"
+    "sqlServerFqdn": "[concat(variables('sqlServerName'), '.database.windows.net')]",
+    "bootstrapScriptUrl": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/1b9c823a9d89b29bcefb26bc282f56c8c02a9a33/DeploymentPackage/psscript-01.ps1"
   },
   "resources": [
     {
-      "type": "Microsoft.Network/networkSecurityGroups",
-      "apiVersion": "2024-05-01",
-      "name": "[variables('nsgName')]",
-      "location": "[resourceGroup().location]",
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2017-04-01",
+      "name": "[variables('virtualNetworkName1')]",
+      "location": "[variables('location')]",
       "properties": {
-        "securityRules": [
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('addressPrefix')]"
+          ]
+        },
+        "subnets": [
           {
-            "name": "Allow-RDP",
+            "name": "[variables('subnetName1')]",
             "properties": {
-              "priority": 1000,
-              "access": "Allow",
-              "direction": "Inbound",
-              "protocol": "Tcp",
-              "sourcePortRange": "*",
-              "destinationPortRange": "3389",
-              "sourceAddressPrefix": "*",
-              "destinationAddressPrefix": "*"
+              "addressPrefix": "[variables('subnetPrefix')]"
             }
           }
         ]
       }
     },
     {
-      "type": "Microsoft.Network/publicIPAddresses",
-      "apiVersion": "2024-05-01",
-      "name": "[variables('pipName')]",
-      "location": "[resourceGroup().location]",
+      "apiVersion": "2018-11-30",
+      "name": "nsdeploy",
+      "location": "[variables('location')]",
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "properties": {},
+      "tags": {}
+    },
+    {
+      "type": "Microsoft.Network/publicIpAddresses",
+      "apiVersion": "2019-02-01",
+      "name": "[variables('publicIpAddressName1')]",
+      "location": "[variables('location')]",
       "sku": {
         "name": "Standard"
       },
       "properties": {
-        "publicIPAllocationMethod": "Static",
-        "publicIPAddressVersion": "IPv4",
+        "publicIpAllocationMethod": "Static",
         "dnsSettings": {
-          "domainNameLabel": "[variables('dnsLabel')]"
+          "domainNameLabel": "[variables('vmPublicIpDnsName')]"
         }
       }
     },
     {
-      "type": "Microsoft.Network/virtualNetworks",
-      "apiVersion": "2024-05-01",
-      "name": "[variables('vnetName')]",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-      ],
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2017-06-01",
+      "name": "[variables('networkSecurityGroupName1')]",
+      "location": "[variables('location')]",
       "properties": {
-        "addressSpace": {
-          "addressPrefixes": [
-            "10.10.0.0/16"
-          ]
-        },
-        "subnets": [
+        "securityRules": [
           {
-            "name": "[variables('subnetName')]",
+            "name": "default-allow-rdp",
             "properties": {
-              "addressPrefix": "10.10.0.0/24",
-              "networkSecurityGroup": {
-                "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
-              }
+              "priority": 110,
+              "protocol": "TCP",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
             }
           }
         ]
@@ -156,35 +144,39 @@
     },
     {
       "type": "Microsoft.Network/networkInterfaces",
-      "apiVersion": "2024-05-01",
-      "name": "[variables('nicName')]",
-      "location": "[resourceGroup().location]",
+      "apiVersion": "2016-09-01",
+      "name": "[variables('networkInterfaceName1')]",
+      "location": "[variables('location')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]",
-        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName1'))]",
+        "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressName1'))]",
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupName1'))]"
       ],
       "properties": {
         "ipConfigurations": [
           {
             "name": "ipconfig1",
             "properties": {
-              "privateIPAllocationMethod": "Dynamic",
               "subnet": {
-                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('subnetName'))]"
+                "id": "[variables('subnetRef1')]"
               },
-              "publicIPAddress": {
-                "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIpAddress": {
+                "id": "[resourceId(resourceGroup().name,'Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1'))]"
               }
             }
           }
-        ]
+        ],
+        "networkSecurityGroup": {
+          "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName1'))]"
+        }
       }
     },
     {
       "type": "Microsoft.Storage/storageAccounts",
       "apiVersion": "2023-05-01",
       "name": "[variables('storageAccountName')]",
-      "location": "[resourceGroup().location]",
+      "location": "[variables('location')]",
       "sku": {
         "name": "Standard_LRS"
       },
@@ -192,9 +184,7 @@
       "properties": {
         "accessTier": "Hot",
         "allowBlobPublicAccess": false,
-        "allowCrossTenantReplication": false,
         "allowSharedKeyAccess": true,
-        "defaultToOAuthAuthentication": false,
         "minimumTlsVersion": "TLS1_2",
         "publicNetworkAccess": "Enabled",
         "supportsHttpsTrafficOnly": true
@@ -215,7 +205,7 @@
       "type": "Microsoft.Sql/servers",
       "apiVersion": "2023-05-01-preview",
       "name": "[variables('sqlServerName')]",
-      "location": "[resourceGroup().location]",
+      "location": "[variables('location')]",
       "properties": {
         "administratorLogin": "[parameters('sqlAdminUsername')]",
         "administratorLoginPassword": "[parameters('sqlAdminPassword')]",
@@ -227,7 +217,7 @@
       "type": "Microsoft.Sql/servers/databases",
       "apiVersion": "2023-05-01-preview",
       "name": "[concat(variables('sqlServerName'), '/', variables('sqlDatabaseName'))]",
-      "location": "[resourceGroup().location]",
+      "location": "[variables('location')]",
       "dependsOn": [
         "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
       ],
@@ -257,70 +247,96 @@
       "name": "[concat(variables('sqlServerName'), '/Allow-Lab-VM')]",
       "dependsOn": [
         "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]",
-        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+        "[resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1'))]"
       ],
       "properties": {
-        "startIpAddress": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress]",
-        "endIpAddress": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress]"
+        "startIpAddress": "[reference(resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1')), '2019-02-01').ipAddress]",
+        "endIpAddress": "[reference(resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1')), '2019-02-01').ipAddress]"
       }
     },
     {
       "type": "Microsoft.Compute/virtualMachines",
-      "apiVersion": "2022-08-01",
-      "name": "[variables('LabVMName')]",
-      "location": "[resourceGroup().location]",
-      "plan": {
-        "name": "win2019",
-        "publisher": "spektra",
-        "product": "cloudlabs-windows-jumpvm"
-      },
+      "apiVersion": "2022-03-01",
+      "name": "[variables('jumphost')]",
+      "location": "[variables('location')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+        "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceName1'))]"
       ],
       "properties": {
+        "osProfile": {
+          "computerName": "[variables('jumphost')]",
+          "adminUsername": "[parameters('vmAdminUsername')]",
+          "adminPassword": "[parameters('vmAdminPassword')]",
+          "windowsConfiguration": {
+            "provisionVmAgent": "true"
+          }
+        },
         "hardwareProfile": {
-          "vmSize": "Standard_B2s"
+          "vmSize": "[variables('virtualMachineSize')]"
         },
         "storageProfile": {
           "imageReference": {
-            "publisher": "Spektra",
-            "offer": "cloudlabs-windows-jumpvm",
-            "sku": "win2019",
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-datacenter-g2",
             "version": "latest"
           },
           "osDisk": {
+            "name": "[concat(variables('jumphost'),'OSDisk')]",
             "createOption": "FromImage",
             "managedDisk": {
-              "storageAccountType": "StandardSSD_LRS"
+              "storageAccountType": "[parameters('diskStorageType')]"
             }
           }
-        },
-        "osProfile": {
-          "computerName": "[variables('LabVMName')]",
-          "adminUsername": "[parameters('adminUsername')]",
-          "adminPassword": "[parameters('adminPassword')]"
         },
         "networkProfile": {
           "networkInterfaces": [
             {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceName1'))]"
             }
           ]
-        },
-        "diagnosticsProfile": {
-          "bootDiagnostics": {
-            "enabled": true
+        }
+      },
+      "resources": [
+        {
+          "type": "Microsoft.Compute/virtualMachines/extensions",
+          "apiVersion": "2015-06-15",
+          "name": "[concat(variables('jumphost'),'/', 'winExtension')]",
+          "location": "[variables('location')]",
+          "dependsOn": [
+            "[concat('Microsoft.Compute/virtualMachines/', variables('jumphost'))]",
+            "[resourceId('Microsoft.Sql/servers/databases', variables('sqlServerName'), variables('sqlDatabaseName'))]",
+            "[resourceId('Microsoft.Sql/servers/firewallRules', variables('sqlServerName'), 'AllowAllWindowsAzureIps')]",
+            "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageAccountName'), 'default', variables('validationContainerName'))]"
+          ],
+          "tags": {
+            "displayName": "VM Extension"
+          },
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.8",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "https://experienceazure.blob.core.windows.net/templates/cloudlabs-common/cloudlabs-windows-functions.ps1",
+                "[variables('bootstrapScriptUrl')]"
+              ]
+            },
+            "protectedSettings": {
+              "commandToExecute": "[concat('powershell.exe -ExecutionPolicy ByPass -File psscript-01.ps1', variables('cloudlabsCommon'), variables('Enable-CloudLabsEmbeddedShadow'), variables('labSpecific'))]"
+            }
           }
         }
-      }
+      ]
     },
     {
       "type": "Microsoft.DevTestLab/schedules",
       "apiVersion": "2018-09-15",
-      "name": "[concat('shutdown-computevm-', variables('LabVMName'))]",
-      "location": "[resourceGroup().location]",
+      "name": "[concat('shutdown-computevm-', variables('jumphost'))]",
+      "location": "[variables('location')]",
       "dependsOn": [
-        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('jumphost'))]"
       ],
       "properties": {
         "status": "Enabled",
@@ -333,72 +349,46 @@
           "status": "Disabled",
           "timeInMinutes": 30
         },
-        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]"
-      }
-    },
-    {
-      "type": "Microsoft.Compute/virtualMachines/extensions",
-      "apiVersion": "2022-11-01",
-      "name": "[concat(variables('LabVMName'), '/bootstrap')]",
-      "location": "[resourceGroup().location]",
-      "dependsOn": [
-        "[resourceId('Microsoft.Compute/virtualMachines', variables('LabVMName'))]",
-        "[resourceId('Microsoft.Sql/servers/databases', variables('sqlServerName'), variables('sqlDatabaseName'))]",
-        "[resourceId('Microsoft.Sql/servers/firewallRules', variables('sqlServerName'), 'AllowAllWindowsAzureIps')]",
-        "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageAccountName'), 'default', variables('validationContainerName'))]"
-      ],
-      "properties": {
-        "publisher": "Microsoft.Compute",
-        "type": "CustomScriptExtension",
-        "typeHandlerVersion": "1.10",
-        "autoUpgradeMinorVersion": true,
-        "settings": {
-          "fileUris": [
-            "[variables('scripturl')]"
-          ]
-        },
-        "protectedSettings": {
-          "commandToExecute": "[concat('powershell -ExecutionPolicy Bypass -File psscript-01.ps1 -AzureUserName \"', parameters('azureUserName'), '\" -AzurePassword \"', parameters('azurePassword'), '\" -AzureTenantID \"', subscription().tenantId, '\" -AzureSubscriptionID \"', subscription().subscriptionId, '\" -ODLID \"', parameters('ODLID'), '\" -InstallCloudLabsShadow \"true\" -DeploymentID \"', parameters('DeploymentID'), '\" -vmAdminUsername \"', parameters('adminUsername'), '\" -vmAdminPassword \"', parameters('adminPassword'), '\" -trainerUserName \"', parameters('trainerUserName'), '\" -trainerUserPassword \"', parameters('trainerUserPassword'), '\" -SqlServerFqdn \"', variables('sqlServerFqdn'), '\" -SqlDatabaseName \"', variables('sqlDatabaseName'), '\" -SqlAdminUsername \"', parameters('sqlAdminUsername'), '\" -SqlAdminPassword \"', parameters('sqlAdminPassword'), '\"')]"
-        }
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', variables('jumphost'))]"
       }
     }
   ],
   "outputs": {
-    "vmServerDnsName": {
-      "type": "string",
-      "value": "[if(empty(reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').dnsSettings.fqdn), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').ipAddress, reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName')), '2024-05-01').dnsSettings.fqdn)]"
+    "LABVM Admin Username": {
+      "type": "String",
+      "value": "[parameters('vmAdminUsername')]"
     },
-    "vmServerUsername": {
-      "type": "string",
-      "value": "[parameters('adminUsername')]"
+    "LABVM Admin Password": {
+      "type": "String",
+      "value": "[parameters('vmAdminPassword')]"
     },
-    "vmServerPassword": {
-      "type": "string",
-      "value": "[parameters('adminPassword')]"
+    "LABVM DNS Name": {
+      "type": "String",
+      "value": "[concat(variables('vmPublicIpDnsName'), '.', resourceGroup().location, '.cloudapp.azure.com')]"
     },
-    "trainerUserName": {
-      "type": "string",
-      "value": "[parameters('trainerUserName')]"
+    "Deployment ID": {
+      "type": "String",
+      "value": "[parameters('DeploymentID')]"
     },
-    "trainerUserPassword": {
-      "type": "string",
-      "value": "[parameters('trainerUserPassword')]"
-    },
-    "sqlServerFqdn": {
-      "type": "string",
+    "SQL Server Name": {
+      "type": "String",
       "value": "[variables('sqlServerFqdn')]"
     },
-    "sqlDatabaseName": {
-      "type": "string",
+    "SQL Database Name": {
+      "type": "String",
       "value": "[variables('sqlDatabaseName')]"
     },
-    "validationStorageAccountName": {
-      "type": "string",
-      "value": "[variables('storageAccountName')]"
+    "SQL Admin Username": {
+      "type": "String",
+      "value": "[parameters('sqlAdminUsername')]"
     },
-    "validationContainerName": {
-      "type": "string",
-      "value": "[variables('validationContainerName')]"
+    "SQL Admin Password": {
+      "type": "String",
+      "value": "[parameters('sqlAdminPassword')]"
+    },
+    "Validation Storage Account": {
+      "type": "String",
+      "value": "[variables('storageAccountName')]"
     }
   }
 }

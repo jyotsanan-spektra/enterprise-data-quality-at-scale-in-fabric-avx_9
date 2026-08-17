@@ -2,35 +2,44 @@
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "azureUserName": {
+    "vmAdminUsername": {
+      "value": "demouser"
+    },
+    "vmAdminPassword": {
+      "value": "demo!pass123"
+    },
+    "AzureUserName": {
       "value": "GET-AZUSER-UPN"
     },
-    "azurePassword": {
+    "AzurePassword": {
       "value": "GET-AZUSER-PASSWORD"
     },
     "ODLID": {
       "value": "GET-ODL-ID"
     },
+    "azuserobjectid": {
+      "value": "GET-AZUSER-OBJECTID"
+    },
+    "ServicePrincipalClientId": {
+      "value": "GET-SERVICEPRINCIPAL-APPLICATION-ID"
+    },
+    "ClientSecret": {
+      "value": "GET-SERVICEPRINCIPAL-SECRET"
+    },
     "DeploymentID": {
       "value": "GET-DEPLOYMENT-ID"
     },
-    "adminUsername": {
-      "value": "azureuser"
-    },
-    "adminPassword": {
-      "value": "GEN-PASSWORD"
-    },
     "trainerUserName": {
-      "value": "instructor"
+      "value": "trainer"
     },
     "trainerUserPassword": {
-      "value": "GEN-PASSWORD"
+      "value": "Password.!!1"
     },
     "sqlAdminUsername": {
       "value": "cdqadmin"
     },
     "sqlAdminPassword": {
-      "value": "GEN-PASSWORD"
+      "value": "Password.!!1"
     }
   }
 }
