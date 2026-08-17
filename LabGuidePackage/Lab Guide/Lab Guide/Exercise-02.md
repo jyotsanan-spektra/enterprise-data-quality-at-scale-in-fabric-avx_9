@@ -124,7 +124,7 @@ In this task, you will record the numbers you just observed in Fabric into an ev
        if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
    }
 
-   Connect-AzAccount -Identity -ErrorAction SilentlyContinue | Out-Null
+   # Sign in with the same lab credentials you used for the Azure portal, if you are not already signed in.
    if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
 
    $storageAccountName = $envMap['VALIDATION_STORAGE_ACCOUNT']

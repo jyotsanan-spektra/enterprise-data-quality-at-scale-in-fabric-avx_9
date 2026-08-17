@@ -225,7 +225,7 @@
         "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
       ],
       "sku": {
-        "name": "S0",
+        "name": "S3",
         "tier": "Standard"
       },
       "properties": {

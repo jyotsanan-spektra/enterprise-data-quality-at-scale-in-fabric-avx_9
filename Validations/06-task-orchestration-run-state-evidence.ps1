@@ -37,7 +37,10 @@ do {
     try {
         Set-AzContext -Subscription $sub -ErrorAction Stop
 
-        $storage = Get-AzStorageAccount -ResourceGroupName $rg -Name ("stfabricval" + $DID.Replace('-', '').Substring(0, 12)) -ErrorAction SilentlyContinue
+        $expectedStorageName = "stfabricval" + $DID.Replace('-', '').ToLower()
+        if ($expectedStorageName.Length -gt 23) { $expectedStorageName = $expectedStorageName.Substring(0, 23) }
+
+        $storage = Get-AzStorageAccount -ResourceGroupName $rg -Name $expectedStorageName -ErrorAction SilentlyContinue
         if (-not $storage) {
             $storage = Get-AzStorageAccount -ResourceGroupName $rg -ErrorAction SilentlyContinue |
                 Where-Object { $_.StorageAccountName -like 'stfabricval*' } |

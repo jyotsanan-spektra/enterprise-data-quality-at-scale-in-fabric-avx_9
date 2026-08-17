@@ -189,12 +189,25 @@ try {
         & python -m pip install --upgrade pip
         & python -m pip install pandas pyarrow deltalake notebook jupyterlab python-dotenv
 
-        Write-Log 'Installing the SqlServer PowerShell module for Contoso_Operations provisioning.'
+        Write-Log 'Installing PowerShell modules required by the bootstrap and by the lab exercises.'
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+
+        # SqlServer: used below to provision Contoso_Operations.
         if (-not (Get-Module -ListAvailable -Name SqlServer)) {
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
             Install-Module -Name SqlServer -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
         }
         Import-Module SqlServer -ErrorAction Stop
+
+        # Az.Accounts / Az.Storage: used by the learner in Challenges 2-6 to upload validation
+        # evidence (Connect-AzAccount, Get-AzStorageAccount, Set-AzStorageBlobContent). Do not
+        # assume the base image ships these - the evidence upload steps fail without them.
+        foreach ($module in @('Az.Accounts', 'Az.Storage')) {
+            if (-not (Get-Module -ListAvailable -Name $module)) {
+                Write-Log "Installing PowerShell module: $module"
+                Install-Module -Name $module -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
+            }
+        }
     }
 
     function Initialize-LabFolders {
