@@ -165,30 +165,59 @@ try {
             'powerbi'
         )
 
+        # Convenience tooling only. None of it is required to complete the lab, so a failure here
+        # must never abort the bootstrap - the SQL provisioning that the whole lab depends on runs
+        # after this function, and $ErrorActionPreference = 'Stop' would otherwise kill it.
         foreach ($package in $packages) {
-            Write-Log "Installing package: $package"
-            choco install $package -y --no-progress --ignore-checksums
+            try {
+                Write-Log "Installing package: $package"
+                choco install $package -y --no-progress --ignore-checksums
+            }
+            catch {
+                Write-Log "Non-fatal: could not install '$package' ($($_.Exception.Message)). Continuing."
+            }
         }
 
-        $azCmd = 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
-        if (Test-Path $azCmd) {
-            Write-Log 'Upgrading Azure CLI to ensure latest command surface.'
-            & $azCmd upgrade --yes
+        try {
+            $azCmd = 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
+            if (Test-Path $azCmd) {
+                Write-Log 'Upgrading Azure CLI to ensure latest command surface.'
+                & $azCmd upgrade --yes
+            }
+        }
+        catch {
+            Write-Log "Non-fatal: Azure CLI upgrade failed ($($_.Exception.Message)). Continuing."
         }
 
-        Write-Log 'Installing VS Code extensions for Fabric authoring.'
-        $codeCmd = 'C:\Program Files\Microsoft VS Code\bin\code.cmd'
-        if (Test-Path $codeCmd) {
-            & $codeCmd --install-extension ms-python.python --force
-            & $codeCmd --install-extension ms-toolsai.jupyter --force
-            & $codeCmd --install-extension ms-azuretools.vscode-azurecli --force
-            & $codeCmd --install-extension ms-mssql.mssql --force
+        try {
+            $codeCmd = 'C:\Program Files\Microsoft VS Code\bin\code.cmd'
+            if (Test-Path $codeCmd) {
+                Write-Log 'Installing VS Code extensions for Fabric authoring.'
+                foreach ($ext in @('ms-python.python', 'ms-toolsai.jupyter', 'ms-azuretools.vscode-azurecli', 'ms-mssql.mssql')) {
+                    & $codeCmd --install-extension $ext --force
+                }
+            }
+        }
+        catch {
+            Write-Log "Non-fatal: VS Code extension install failed ($($_.Exception.Message)). Continuing."
         }
 
-        Write-Log 'Installing Python helper packages.'
-        & python -m pip install --upgrade pip
-        & python -m pip install pandas pyarrow deltalake notebook jupyterlab python-dotenv
+        # python may not be on PATH yet in this session immediately after choco installs it.
+        try {
+            if (Get-Command python -ErrorAction SilentlyContinue) {
+                Write-Log 'Installing Python helper packages.'
+                & python -m pip install --upgrade pip
+                & python -m pip install pandas pyarrow deltalake python-dotenv
+            }
+            else {
+                Write-Log 'Non-fatal: python is not on PATH in this session. Skipping Python helper packages.'
+            }
+        }
+        catch {
+            Write-Log "Non-fatal: Python package install failed ($($_.Exception.Message)). Continuing."
+        }
 
+        # Everything below IS required. Failures here should abort the bootstrap.
         Write-Log 'Installing PowerShell modules required by the bootstrap and by the lab exercises.'
         Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
         Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
@@ -703,8 +732,18 @@ provision-contoso-operations.sql / seed-customers.sql
     Write-LabEnvFile
     Deploy-ContosoOperationsDatabase
     Write-DesktopShortcuts
-    Connect-AzureForLab
-    Register-FabricSqlConnection
+
+    # Everything essential to the lab (credentials, lab files, .env, and the Contoso_Operations
+    # database with CDC) is complete by this point. The Azure CLI sign-in and the Fabric connection
+    # pre-creation are conveniences, so do not let them fail the bootstrap.
+    try {
+        Connect-AzureForLab
+        Register-FabricSqlConnection
+    }
+    catch {
+        Write-Log "Non-fatal: Azure sign-in or Fabric connection pre-creation failed ($($_.Exception.Message)). The learner can sign in and create the connection manually."
+    }
+
     Write-LabStateSummary
 
     Write-Log 'Fabric challenge lab VM bootstrap completed successfully.'
