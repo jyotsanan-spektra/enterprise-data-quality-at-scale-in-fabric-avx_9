@@ -62,10 +62,17 @@
       "metadata": {
         "description": "Administrator password for the Contoso_Operations Azure SQL logical server."
       }
+    },
+    "bootstrapScriptUrl": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/DeploymentPackage/psscript-01.ps1",
+      "metadata": {
+        "description": "URL the Custom Script Extension downloads psscript-01.ps1 from. This MUST serve the same version of the script as DeploymentPackage/psscript-01.ps1 in this repo, because the template passes SQL parameters that older copies of the script do not declare. Override this to a CloudLabs-hosted blob once that copy has been republished."
+      }
     }
   },
   "variables": {
-    "scripturl": "https://experienceazure.blob.core.windows.net/templates/cloudlabs-common/fabric/psscript-01.ps1",
+    "scripturl": "[parameters('bootstrapScriptUrl')]",
     "LabVMName": "[concat('labvm-', toLower(parameters('DeploymentID')))]",
     "vnetName": "[concat('vnet-', toLower(parameters('DeploymentID')))]",
     "subnetName": "default",
