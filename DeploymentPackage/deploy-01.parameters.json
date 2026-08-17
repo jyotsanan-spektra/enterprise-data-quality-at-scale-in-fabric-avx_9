@@ -8,6 +8,12 @@
     "vmAdminPassword": {
       "value": "demo!pass123"
     },
+    "adminUsername": {
+      "value": "demouser"
+    },
+    "adminPassword": {
+      "value": "demo!pass123"
+    },
     "AzureUserName": {
       "value": "GET-AZUSER-UPN"
     },

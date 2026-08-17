@@ -19,24 +19,39 @@
       "type": "string"
     },
     "vmAdminUsername": {
+      "defaultValue": "",
       "type": "string"
     },
     "vmAdminPassword": {
+      "defaultValue": "",
+      "type": "SecureString"
+    },
+    "adminUsername": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "adminPassword": {
+      "defaultValue": "",
       "type": "SecureString"
     },
     "azuserobjectid": {
+      "defaultValue": "",
       "type": "string"
     },
     "ServicePrincipalClientId": {
+      "defaultValue": "",
       "type": "string"
     },
     "ClientSecret": {
+      "defaultValue": "",
       "type": "string"
     },
     "trainerUserName": {
+      "defaultValue": "trainer",
       "type": "string"
     },
     "trainerUserPassword": {
+      "defaultValue": "Password.!!1",
       "type": "string"
     },
     "sqlAdminUsername": {
@@ -44,12 +59,15 @@
       "type": "string"
     },
     "sqlAdminPassword": {
+      "defaultValue": "Contoso.Fabric!2026",
       "type": "securestring"
     }
   },
   "variables": {
+    "vmUser": "[if(empty(parameters('vmAdminUsername')), parameters('adminUsername'), parameters('vmAdminUsername'))]",
+    "vmPass": "[if(empty(parameters('vmAdminPassword')), parameters('adminPassword'), parameters('vmAdminPassword'))]",
     "cloudlabsCommon": "[concat(' -AzureUserName ', parameters('AzureUserName'), ' -AzurePassword ', parameters('AzurePassword'), ' -AzureTenantID ', variables('AzureTenantID'), ' -AzureSubscriptionID ', variables('AzureSubscriptionID'), ' -ODLID ', parameters('ODLID'), ' -DeploymentID ', parameters('DeploymentID'),' -azuserobjectid ', parameters('azuserobjectid'))]",
-    "Enable-CloudLabsEmbeddedShadow": "[concat(' -vmAdminUsername ', parameters('vmAdminUsername'), ' -trainerUserName ', parameters('trainerUserName'), ' -trainerUserPassword ', parameters('trainerUserPassword'))]",
+    "Enable-CloudLabsEmbeddedShadow": "[concat(' -vmAdminUsername ', variables('vmUser'), ' -trainerUserName ', parameters('trainerUserName'), ' -trainerUserPassword ', parameters('trainerUserPassword'))]",
     "labSpecific": "[concat(' -SqlServerFqdn ', variables('sqlServerFqdn'), ' -SqlDatabaseName ', variables('sqlDatabaseName'), ' -SqlAdminUsername ', parameters('sqlAdminUsername'), ' -SqlAdminPassword ', parameters('sqlAdminPassword'))]",
     "AzureSubscriptionID": "[subscription().subscriptionId]",
     "AzureTenantID": "[subscription().tenantId]",
@@ -265,8 +283,8 @@
       "properties": {
         "osProfile": {
           "computerName": "[variables('jumphost')]",
-          "adminUsername": "[parameters('vmAdminUsername')]",
-          "adminPassword": "[parameters('vmAdminPassword')]",
+          "adminUsername": "[variables('vmUser')]",
+          "adminPassword": "[variables('vmPass')]",
           "windowsConfiguration": {
             "provisionVmAgent": "true"
           }
@@ -356,11 +374,11 @@
   "outputs": {
     "LABVM Admin Username": {
       "type": "String",
-      "value": "[parameters('vmAdminUsername')]"
+      "value": "[variables('vmUser')]"
     },
     "LABVM Admin Password": {
       "type": "String",
-      "value": "[parameters('vmAdminPassword')]"
+      "value": "[variables('vmPass')]"
     },
     "LABVM DNS Name": {
       "type": "String",
