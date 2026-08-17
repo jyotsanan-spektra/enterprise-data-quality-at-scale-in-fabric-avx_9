@@ -23,17 +23,25 @@ In this task, you will open the Warehouse from Challenge 1 and create the custom
 1. Open Microsoft Fabric at <https://app.fabric.microsoft.com> and sign in with the lab credentials if you are prompted:
    - Username: <inject key="AzureAdUserEmail"></inject>
    - Password: <inject key="AzureAdUserPassword"></inject>
-2. Open the workspace you used earlier in the lab, and then select the Warehouse item you created for the Gold layer in Challenge 1.
+2. Open the workspace you used earlier in the lab, and then select the Warehouse item you created for the Gold layer in Challenge 1 (**contoso_gold_wh**).
 3. On the Warehouse ribbon, select **New SQL query** to open the SQL query editor.
-4. Create a new dimension table for customer history. Your table must include the following logical elements:
-   - A surrogate key column for the warehouse dimension row
-   - A customer business key column that remains stable across versions
-   - Customer descriptive attributes you plan to track, such as name, city, state, segment, or status
-   - An effective start column
-   - An effective end column
-   - A current-row flag
-5. Use a Fabric Warehouse-supported table definition. If you want to use an automatically generated surrogate key, define it with a `BIGINT IDENTITY` column because that is the supported identity pattern for Warehouse in Microsoft Fabric.
-6. Run the create-table statement, and then refresh the Warehouse explorer to confirm the customer dimension table appears.
+4. Create the customer dimension table named `dim_customer` by running the following statement. These columns map directly to the prepared `customers_baseline.csv` source file plus the four SCD Type 2 tracking columns:
+
+   ```sql
+   CREATE TABLE dim_customer (
+       CustomerKey   BIGINT IDENTITY(1,1) NOT NULL,
+       CustomerID    INT           NOT NULL,
+       CustomerName  VARCHAR(200)  NOT NULL,
+       Segment       VARCHAR(50)   NOT NULL,
+       Country       VARCHAR(50)   NOT NULL,
+       EffectiveDate DATE          NOT NULL,
+       ExpiryDate    DATE          NULL,
+       IsCurrent     BIT           NOT NULL
+   );
+   ```
+
+5. Run the statement, then refresh the Warehouse explorer and confirm `dim_customer` appears with 8 columns.
+6. Run `SELECT COUNT(*) FROM dim_customer;` and confirm the result is **0** — the table must be empty before Task 2.
 7. Record the deployment context for this lab run using **<inject key="DeploymentID" enableCopy="false"/>** so you can tie your validation evidence to the correct environment.
 
 > [!Important]
@@ -43,14 +51,28 @@ In this task, you will open the Warehouse from Challenge 1 and create the custom
 
 In this task, you will populate the first version of the customer dimension so you have a baseline state before any tracked changes occur.
 
-1. Identify the prepared customer source data provided for this lab scenario and review the columns that represent the customer business key and the tracked descriptive attributes.
-2. In the SQL query editor, write the initial load statement that inserts one row per customer into your Gold customer dimension.
-3. Set the effective start column to the load date or load timestamp used by your implementation.
-4. Set the effective end column to an open-ended value that represents the active version in your design.
-5. Set the current-row flag so every baseline row is marked as current.
-6. Run the initial load.
-7. Query the dimension table and confirm that each customer business key currently appears only once.
-8. Save or note the baseline row count because you will compare it after the Type 2 change processing step.
+1. Confirm the prepared customer source file exists at `C:\LabFiles\FabricChallengeLab\Samples\customers_baseline.csv` on the lab VM, and open it to review its columns: `CustomerID`, `CustomerName`, `Segment`, `Country`. This file contains 5,000 customer rows.
+2. Upload `customers_baseline.csv` into your Lakehouse's **Files** area: open **contoso_medallion_lh**, select **Files**, then **Upload > Upload files**, and choose the CSV.
+3. Load the file into `dim_customer` using one of the following methods, depending on what your environment supports:
+   - In the Warehouse SQL query editor, use **COPY INTO dim_customer** pointed at the uploaded file's OneLake path (right-click the file in **Files** and select **Copy Path** to get the exact path), mapping only the `CustomerID`, `CustomerName`, `Segment`, and `Country` source columns.
+   - If `COPY INTO` from a Files location is not available in your environment, use a notebook cell to read the CSV with Spark and write the rows into `dim_customer` through the Warehouse's SQL connection string (saved in Challenge 1, Task 2).
+4. Regardless of method, insert one row per source customer with:
+   - `CustomerID`, `CustomerName`, `Segment`, `Country` copied directly from the source file
+   - `EffectiveDate` set to today's load date
+   - `ExpiryDate` set to `NULL`
+   - `IsCurrent` set to `1`
+5. Run the initial load.
+6. Run `SELECT COUNT(*) FROM dim_customer;` and confirm the result is exactly **5000** — matching the row count in `customers_baseline.csv`.
+7. Run the following query and confirm it returns **zero rows**, proving each customer currently appears only once:
+
+   ```sql
+   SELECT CustomerID, COUNT(*) AS RowCount
+   FROM dim_customer
+   GROUP BY CustomerID
+   HAVING COUNT(*) > 1;
+   ```
+
+8. Record **5000** as your baseline row count — you will compare against it after Task 3.
 
 > [!Note]
 > An initial SCD Type 2 load behaves like a full current snapshot: all rows are inserted as the first active versions. Versioning behavior becomes visible only when a later change set modifies tracked attributes for an existing customer.
@@ -59,25 +81,82 @@ In this task, you will populate the first version of the customer dimension so y
 
 In this task, you will process the prepared customer changes by expiring prior rows and inserting replacement current rows, then verify the final state with SQL queries.
 
-1. Review the provided customer change set and identify which customers have tracked attribute changes.
-2. In your Warehouse load logic, match incoming rows to the current customer dimension row by business key.
-3. For every matched customer whose tracked attributes changed, update the existing current row so it is no longer current and set its effective end value to the processing date or timestamp.
-4. Insert a new row for each changed customer with:
-   - A new surrogate key
-   - The same customer business key
-   - The updated attribute values
-   - A new effective start value
-   - The open-ended effective end value
-   - The current-row flag set to true
-5. For customers with no tracked attribute changes, do not create duplicate rows.
-6. Run the change-processing logic.
-7. Query the customer dimension and confirm that at least one changed customer now has two versions tied to the same business key.
-8. Run validation queries that prove all of the following:
-   - The older row is expired
-   - The new row is current
-   - Only one current row exists per business key
-   - Unchanged customers still have a single row
-9. Capture the output of your validation queries for your records.
+1. Confirm the prepared change file exists at `C:\LabFiles\FabricChallengeLab\Samples\customers_changes.csv` and open it. It contains 200 rows, each with a `CustomerID` that already exists in `dim_customer` and an updated `Segment` and/or `Country` value.
+2. Upload `customers_changes.csv` into the Lakehouse **Files** area alongside the baseline file.
+3. Load the change file into a staging table named `stg_customer_changes` in the Warehouse, using the same COPY INTO or notebook-based method you used in Task 2.
+4. Run `SELECT COUNT(*) FROM stg_customer_changes;` and confirm the result is exactly **200**.
+5. In the Warehouse SQL query editor, expire the current row for every changed customer:
+
+   ```sql
+   UPDATE dim_customer
+   SET IsCurrent = 0,
+       ExpiryDate = CAST(GETDATE() AS DATE)
+   WHERE IsCurrent = 1
+     AND CustomerID IN (SELECT CustomerID FROM stg_customer_changes);
+   ```
+
+6. Insert a new current row for every changed customer using the updated attribute values from staging:
+
+   ```sql
+   INSERT INTO dim_customer (CustomerID, CustomerName, Segment, Country, EffectiveDate, ExpiryDate, IsCurrent)
+   SELECT s.CustomerID, s.CustomerName, s.Segment, s.Country, CAST(GETDATE() AS DATE), NULL, 1
+   FROM stg_customer_changes s;
+   ```
+
+7. Run `SELECT COUNT(*) FROM dim_customer;` and confirm the result is exactly **5200** — the original 5,000 plus 200 new versions.
+8. Run the following query and confirm it returns exactly **200 rows**, one per changed customer with both an expired and a current version:
+
+   ```sql
+   SELECT CustomerID, COUNT(*) AS VersionCount
+   FROM dim_customer
+   GROUP BY CustomerID
+   HAVING COUNT(*) = 2;
+   ```
+
+9. Run each of the following validation queries and confirm the stated result:
+   - Expired rows are dated correctly:
+     ```sql
+     SELECT COUNT(*) FROM dim_customer WHERE IsCurrent = 0 AND ExpiryDate = CAST(GETDATE() AS DATE);
+     ```
+     Expected result: **200**.
+   - Every customer has exactly one current row:
+     ```sql
+     SELECT COUNT(*) FROM dim_customer WHERE IsCurrent = 1;
+     ```
+     Expected result: **5000**.
+   - No customer has more than one current row:
+     ```sql
+     SELECT CustomerID, COUNT(*) FROM dim_customer WHERE IsCurrent = 1 GROUP BY CustomerID HAVING COUNT(*) > 1;
+     ```
+     Expected result: **zero rows returned**.
+   - Unchanged customers still have exactly one row:
+     ```sql
+     SELECT CustomerID, COUNT(*) FROM dim_customer
+     WHERE CustomerID NOT IN (SELECT CustomerID FROM stg_customer_changes)
+     GROUP BY CustomerID
+     HAVING COUNT(*) <> 1;
+     ```
+     Expected result: **zero rows returned**.
+10. Capture the output of all four validation queries for your records.
+11. Optional, but required if you plan to orchestrate this challenge in Challenge 6: wrap steps 5–6 in a stored procedure so the change-processing logic can be invoked as a single orchestration step later.
+
+    ```sql
+    CREATE PROCEDURE usp_process_customer_changes
+    AS
+    BEGIN
+        UPDATE dim_customer
+        SET IsCurrent = 0,
+            ExpiryDate = CAST(GETDATE() AS DATE)
+        WHERE IsCurrent = 1
+          AND CustomerID IN (SELECT CustomerID FROM stg_customer_changes);
+
+        INSERT INTO dim_customer (CustomerID, CustomerName, Segment, Country, EffectiveDate, ExpiryDate, IsCurrent)
+        SELECT s.CustomerID, s.CustomerName, s.Segment, s.Country, CAST(GETDATE() AS DATE), NULL, 1
+        FROM stg_customer_changes s;
+    END;
+    ```
+
+    Run `EXEC usp_process_customer_changes;` once on a fresh load to confirm it reproduces the same counts as steps 5–8 above, then note the procedure name — Challenge 6 references it directly.
 
 > [!Tip]
 > Microsoft Learn describes the Type 2 pattern as expiring the old version and inserting a new current version rather than updating the descriptive values in place. If your result shows one overwritten row instead of two versions for a changed customer, the dimension is not behaving as Type 2.
