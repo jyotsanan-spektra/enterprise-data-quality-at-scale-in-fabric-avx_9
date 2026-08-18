@@ -17,6 +17,9 @@ In this challenge, you will trigger a controlled corruption event against `silve
 - Task 3: Restore `silver_orders` and capture recovery evidence
 - Task 4: Create a backup clone and upload the final validation files
 
+> [!Important]
+> This exercise's evidence example values assume `silver_orders` has ~100,500 rows, carried over from Challenge 2's assumed change-set size. In this environment, the corrected row count is ~100,350 (see the note at the top of Challenge 4, Task 1). Use your actual observed row counts throughout Task 4, not the example numbers below. Task 4 step 5 also assumes `C:\LabFiles\.env` and a pre-provisioned validation storage account exist — since they don't in this environment, step 5 below reuses the storage account created in Challenge 2, Task 6 by looking it up directly instead.
+
 ## Task 1: Reproduce the controlled corruption incident
 
 In this task, you will simulate the upstream incident that damaged the Silver table, so that there is a real corruption event in the Delta history for you to investigate and recover from.
@@ -209,13 +212,13 @@ In this task, you will create a shallow clone of the restored table and upload a
    print("cloneRowCount =", clone_count)
    ```
 
-4. On the lab VM, open PowerShell. Fill in the four values below with the numbers you recorded in Tasks 2, 3, and 4, then run the block to create all three evidence files at once:
+4. On the lab VM, open PowerShell. Fill in the four values below with the numbers you actually recorded in Tasks 2, 3, and 4 — use your real observed row count (approximately **100,350** in this environment, not the 100,500 shown as an example), then run the block to create all three evidence files at once:
 
    ```powershell
-   $corruptedVersion = 5        # Task 2, step 7
-   $goodVersion      = 4        # Task 2, step 7
-   $restoredRowCount = 100500   # Task 3, step 6
-   $cloneRowCount    = 100500   # Task 4, step 3
+   $corruptedVersion = 5        # Task 2, step 7 - your actual corrupted version number
+   $goodVersion      = 4        # Task 2, step 7 - your actual last-known-good version number
+   $restoredRowCount = 100350   # Task 3, step 6 - your actual restored row count
+   $cloneRowCount    = 100350   # Task 4, step 3 - your actual clone row count
 
    New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
 
@@ -241,30 +244,38 @@ In this task, you will create a shallow clone of the restored table and upload a
    Get-ChildItem 'C:\LabFiles\validation'
    ```
 
-5. Upload all three evidence files to the validation storage account:
+5. Upload all three evidence files, reusing the **same** validation storage account created in Challenge 2, Task 6. Since `C:\LabFiles\.env` does not exist in this environment, this script finds the storage account by its `stfabricval*` naming prefix instead of reading it from a file:
 
    ```powershell
-   $envMap = @{}
-   Get-Content 'C:\LabFiles\.env' | ForEach-Object {
-       if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
-   }
+   $ErrorActionPreference = 'Stop'
+
+   $resourceGroup  = 'labvmrg'      # same resource group you used in previous challenges
+   $containerName  = 'validation'
 
    if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
 
-   $resourceGroup = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
-   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $envMap['VALIDATION_STORAGE_ACCOUNT']).Context
+   $storageAccount = Get-AzStorageAccount -ResourceGroupName $resourceGroup |
+       Where-Object { $_.StorageAccountName -like 'stfabricval*' } |
+       Select-Object -First 1
+
+   if (-not $storageAccount) {
+       throw "Could not find a storage account matching 'stfabricval*' in resource group '$resourceGroup'. Hardcode the exact name instead: `$storageAccount = Get-AzStorageAccount -ResourceGroupName '$resourceGroup' -Name '<exact-name>'"
+   }
+
+   $ctx = $storageAccount.Context
 
    @(
        'silver-recovery-history.json',
        'silver-recovery-restore.json',
        'silver-recovery-clone.json'
    ) | ForEach-Object {
-       Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+       Set-AzStorageBlobContent -Context $ctx -Container $containerName `
            -File (Join-Path 'C:\LabFiles\validation' $_) -Blob $_ -Force | Out-Null
    }
    ```
+   Adjust `$resourceGroup` if it doesn't match your environment.
 
-6. Confirm all three files uploaded successfully by running `Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name` and checking that all three filenames appear in the output.
+6. Confirm all three files uploaded successfully by running `Get-AzStorageBlob -Context $ctx -Container $containerName | Select-Object Name` and checking that all three filenames appear in the output, alongside `cdc-ingestion.json`, `scd-type2.json`, and `quality-gate.json` from the earlier challenges.
 7. Record in your notes why a shallow clone is appropriate for short-lived recovery testing and point-in-time validation, but not for long-term archival. Because a shallow clone references the source table's files, later cleanup operations such as aggressive file removal can break that dependency.
 
 > [!Important]

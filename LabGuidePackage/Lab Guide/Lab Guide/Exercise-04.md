@@ -21,11 +21,14 @@ You will open or create a Fabric notebook, attach it to your Lakehouse, and impl
 
 In this task, you will return to your learner-created Fabric items and prepare the notebook environment that will enforce the Bronze-to-Silver gate.
 
+> [!Important]
+> This exercise's expected `bronze_orders_cdc` row count assumes Challenge 2's change set added exactly 500 rows. In this environment, the change set was 350 inserts + 150 updates, and updates don't add rows — so the correct expected count throughout this exercise is your actual Challenge 2 result (**100,350** if you followed the corrected Challenge 2 guide), not the "100,500" figure below. Use your real observed number wherever this exercise says ~100,500.
+
 1. Sign in to Microsoft Fabric by using Username: <inject key="AzureAdUserEmail"></inject> and Password: <inject key="AzureAdUserPassword"></inject>.
 2. Open the Fabric workspace you used in the previous challenges.
 3. Note the deployment reference for this lab environment as **<inject key="DeploymentID" enableCopy="false"/>**.
 4. Open the Lakehouse you created or confirmed in Challenge 1 (**contoso_medallion_lh**).
-5. In the **Tables** pane, confirm that the Bronze table `bronze_orders_cdc` exists and shows approximately 100,500 rows (the baseline plus incremental rows from Challenge 2).
+5. In the **Tables** pane, confirm that the Bronze table `bronze_orders_cdc` exists and shows approximately 100,500 rows (the baseline plus incremental rows from Challenge 2) — or your actual corrected count (approximately 100,350) if you followed the corrected Challenge 2 guide.
 6. Confirm whether `silver_orders` already exists. If it does, keep it as the target curated table for this challenge. If it doesn't exist yet, you will create it from the notebook only after the quality checks pass.
 7. From the Lakehouse page, select **Open notebook**, then select **Existing notebook** and choose **nb_data_quality_gate** (the notebook you created in Challenge 1) to open it. If it does not appear in the list, select **New notebook** instead and rename the new notebook to **nb_data_quality_gate**.
 8. If more than one Lakehouse is attached to the notebook, make sure **contoso_medallion_lh** is pinned as the default Lakehouse before you run Spark SQL or use relative table paths.
@@ -38,7 +41,7 @@ In this task, you will return to your learner-created Fabric items and prepare t
    display(bronze_df.limit(10))
    ```
 
-10. Confirm the printed schema lists all 12 expected columns and the row count is approximately 100,500.
+10. Confirm the printed schema lists all 12 expected columns and the row count matches your actual Challenge 2 result (approximately 100,350 in this environment, not 100,500).
 
 > [!Note]
 > Microsoft Learn notes that the pinned default Lakehouse determines the root context for relative paths and Spark SQL in a notebook. Verify the correct Lakehouse is pinned before you run validation code.
@@ -164,7 +167,37 @@ In this task, you will build the step-by-step validation logic that determines w
 
 In this task, you will deliberately test the gate with bad data and confirm the notebook records the failure without refreshing the Silver table.
 
-1. Confirm the prepared defect file exists at `C:\LabFiles\FabricChallengeLab\Samples\quality_defect.csv`. It contains 100 order rows in the same 12-column schema, with exactly 10 rows carrying a blank `OrderID` — a 10% null rate, well above the 0.1% threshold from step 2 of Task 2.
+1. `quality_defect.csv` is not pre-created in this environment. Generate it on the lab VM with the following PowerShell script — 100 rows in the same 12-column schema as `bronze_orders_cdc`, with the first 10 rows carrying a blank `OrderID`:
+
+   ```powershell
+   $countries = @('United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Australia', 'India', 'Japan', 'Brazil', 'Mexico')
+
+   $rows = for ($i = 1; $i -le 100; $i++) {
+       $orderId = if ($i -le 10) { '' } else { 900000 + $i }
+       $unitPrice = [math]::Round((($i % 50) + 10) * 1.5, 2)
+       $quantity = ($i % 10) + 1
+
+       [pscustomobject]@{
+           OrderID         = $orderId
+           CustomerID      = ($i % 5000) + 1
+           OrderDate       = (Get-Date).AddDays(-$i).ToString('yyyy-MM-dd')
+           ShipDate        = (Get-Date).AddDays(-$i + 3).ToString('yyyy-MM-dd')
+           OrderStatus     = 'Submitted'
+           ProductID       = ($i % 500) + 1
+           Quantity        = $quantity
+           UnitPrice       = $unitPrice
+           Discount        = 0
+           Revenue         = [math]::Round($unitPrice * $quantity, 2)
+           ShippingCountry = $countries[$i % $countries.Count]
+           PaymentMethod   = 'CreditCard'
+       }
+   }
+
+   New-Item -ItemType Directory -Path 'C:\LabFiles\FabricChallengeLab\Samples' -Force | Out-Null
+   $rows | Export-Csv -Path 'C:\LabFiles\FabricChallengeLab\Samples\quality_defect.csv' -NoTypeInformation -Force
+   ```
+
+   Confirm it printed 100 rows with 10 blank `OrderID` values before continuing.
 2. Upload `quality_defect.csv` into your Lakehouse **Files** area.
 3. In a new notebook cell, load the defect file and run it through the same checks instead of `bronze_orders_cdc`:
 
@@ -177,11 +210,61 @@ In this task, you will deliberately test the gate with bad data and confirm the 
    ```
 
 4. Confirm the printed null count is **10** and the rate is approximately **10%**, well above the 0.1% threshold — this check should report **Failed**.
-5. Re-run the null check logic from Task 2, step 2 against `defect_df` instead of `bronze_df`, and confirm `null_check_passed` evaluates to `False`.
-6. Confirm the failed rule is recorded in `quality_gate_log` by running `display(spark.table("quality_gate_log").orderBy(F.col("runTimestamp").desc()).limit(5))` and checking that the most recent row shows `status = "Failed"` for `rule = "null_check"`.
-7. Confirm the notebook does **not** write the defective dataset to `silver_orders` — the conditional write logic from Task 2, step 10 should raise an exception rather than overwrite the table when run against `defect_df`.
+5. Re-run the null check logic from Task 2, step 2 against `defect_df` instead of `bronze_df`:
+
+   ```python
+   required_cols = ["OrderID", "CustomerID", "OrderDate", "Revenue"]
+
+   defect_null_counts = {
+       c: defect_df.filter(F.col(c).isNull() | (F.col(c) == "")).count()
+       for c in required_cols
+   }
+   worst_defect_null_rate = max(defect_null_counts.values()) / defect_total
+   null_check_passed = worst_defect_null_rate <= 0.001
+
+   print("defect_null_counts:", defect_null_counts)
+   print("worst_defect_null_rate:", worst_defect_null_rate)
+   print("null_check_passed:", null_check_passed)
+   ```
+
+   > [!Important]
+   > Divide by `defect_total` (100), not `total_rows` (which is still bound to `bronze_df`'s ~100,350 count from Task 2). Dividing by the wrong denominator gives a rate of `10/100350 ≈ 0.01%` — below the 0.1% threshold — which would wrongly report **Passed** and defeat the point of this test. Also note `defect_df` was loaded from CSV without a schema, so missing `OrderID` values are empty strings, not true `NULL` — the check above tests for both, same as step 3.
+
+   Confirm `null_check_passed` prints as **False**.
+
+6. Build a results list for this defect run and persist it to `quality_gate_log`, using separate variable names so you don't overwrite the bronze run's `results`/`overall_passed` from Task 2:
+
+   ```python
+   defect_results = [{
+       "rule": "null_check",
+       "status": "Passed" if null_check_passed else "Failed",
+       "failedRowCount": max(defect_null_counts.values()),
+       "message": str(defect_null_counts)
+   }]
+
+   defect_overall_passed = null_check_passed  # one failed blocking check is enough to fail the whole gate
+   defect_overall_status = "Passed" if defect_overall_passed else "Failed"
+   print("Overall gate status (defect run):", defect_overall_status)
+
+   defect_results_df = spark.createDataFrame(defect_results)
+   defect_results_df.withColumn("runTimestamp", F.current_timestamp()) \
+                     .withColumn("overallStatus", F.lit(defect_overall_status)) \
+                     .write.format("delta").mode("append").saveAsTable("quality_gate_log")
+   ```
+
+   Then confirm the failed rule is recorded by running `display(spark.table("quality_gate_log").orderBy(F.col("runTimestamp").desc()).limit(5))` and checking that the most recent row shows `status = "Failed"` for `rule = "null_check"`.
+7. Confirm the notebook does **not** write the defective dataset to `silver_orders` — re-run the conditional write logic from Task 2, step 10, but against `defect_df`, `defect_overall_passed`, and `defect_results` (not the bronze run's `overall_passed`/`results`, which are unrelated to this test):
+
+   ```python
+   if defect_overall_passed:
+       defect_df.write.format("delta").mode("overwrite").saveAsTable("silver_orders")
+       print("silver_orders written.")
+   else:
+       raise Exception(f"Quality gate failed: {[r for r in defect_results if r['status'] == 'Failed']}")
+   ```
+   This should raise an exception (visible as a red error/traceback in the cell output) rather than printing "silver_orders written." If you get `NameError: name 'defect_overall_passed' is not defined`, you skipped step 6 above — run it first, then retry this cell.
 8. Query `silver_orders` again (`spark.table("silver_orders").count()`) and verify its row count is unchanged from the value you recorded at the end of Task 2.
-9. If you are also preparing for Challenge 6, confirm the `raise Exception(...)` statement in Task 2, step 10 executes and stops the notebook when the gate fails — this is what the pipeline's retry and failure-branch logic in Challenge 6 depends on to detect the failure.
+9. If you are also preparing for Challenge 6, note that the exception raised in step 7 above **is** the confirmation this step asks for — a notebook activity that raises an unhandled exception reports as Failed to a pipeline, which is what triggers Challenge 6's on-failure branch. No additional code is needed here.
 10. Save the notebook after both the pass run (Task 2) and the fail run (this task) are complete.
 11. Keep the Lakehouse, notebook, and logged output available for downstream verification.
 
@@ -193,7 +276,7 @@ In this task, you will record both gate outcomes into an evidence file and uploa
 > Run these commands from a **PowerShell window on the lab VM**, not from a notebook cell. You are typing in the values you observed in the notebook output.
 
 1. On the lab VM, open PowerShell.
-2. Fill in the values below from your two notebook runs, then run the block. `silverRowCountAfterPassRun` and `silverRowCountAfterFailRun` must be equal — that is the proof that the failed gate did not overwrite Silver:
+2. Fill in the values below from your two notebook runs, then run the block. `silverRowCountAfterPassRun` and `silverRowCountAfterFailRun` must be equal — that is the proof that the failed gate did not overwrite Silver. Use your actual observed row count (approximately **100,350** in this environment, not the guide's 100,500 — see the note at the top of Task 1):
 
    ```powershell
    $evidence = [ordered]@{
@@ -201,8 +284,8 @@ In this task, you will record both gate outcomes into an evidence file and uploa
        passRunOverallStatus       = 'Passed'       # Task 2, step 8
        failRunOverallStatus       = 'Failed'       # Task 3, step 5
        failRunFailedRule          = 'null_check'   # Task 3, step 6
-       silverRowCountAfterPassRun = 100500         # Task 2, step 13
-       silverRowCountAfterFailRun = 100500         # Task 3, step 8 - must match the line above
+       silverRowCountAfterPassRun = 100350         # Task 2, step 13 - your actual observed count
+       silverRowCountAfterFailRun = 100350         # Task 3, step 8 - must match the line above
    }
 
    New-Item -ItemType Directory -Path 'C:\LabFiles\validation' -Force | Out-Null
@@ -210,26 +293,34 @@ In this task, you will record both gate outcomes into an evidence file and uploa
    Get-Content 'C:\LabFiles\validation\quality-gate.json'
    ```
 
-3. Upload the file using the same pattern as the previous challenges:
+3. Upload the file, reusing the **same** validation storage account created in Challenge 2, Task 6. Since `C:\LabFiles\.env` does not exist in this environment, this script finds the storage account by its `stfabricval*` naming prefix instead of reading it from a file:
 
    ```powershell
-   $envMap = @{}
-   Get-Content 'C:\LabFiles\.env' | ForEach-Object {
-       if ($_ -match '^(?<k>[A-Z0-9_]+)=(?<v>.*)$') { $envMap[$Matches.k] = $Matches.v }
-   }
+   $ErrorActionPreference = 'Stop'
+
+   $resourceGroup = 'labvmrg'      # same resource group you used in previous challenges
+   $containerName = 'validation'
 
    if (-not (Get-AzContext)) { Connect-AzAccount | Out-Null }
 
-   $resourceGroup = "rg-fabricdataquality-$($envMap['DEPLOYMENT_ID'])"
-   $ctx = (Get-AzStorageAccount -ResourceGroupName $resourceGroup -Name $envMap['VALIDATION_STORAGE_ACCOUNT']).Context
+   $storageAccount = Get-AzStorageAccount -ResourceGroupName $resourceGroup |
+       Where-Object { $_.StorageAccountName -like 'stfabricval*' } |
+       Select-Object -First 1
 
-   Set-AzStorageBlobContent -Context $ctx -Container 'validation' `
+   if (-not $storageAccount) {
+       throw "Could not find a storage account matching 'stfabricval*' in resource group '$resourceGroup'. Hardcode the exact name instead: `$storageAccount = Get-AzStorageAccount -ResourceGroupName '$resourceGroup' -Name '<exact-name>'"
+   }
+
+   $ctx = $storageAccount.Context
+
+   Set-AzStorageBlobContent -Context $ctx -Container $containerName `
        -File 'C:\LabFiles\validation\quality-gate.json' -Blob 'quality-gate.json' -Force | Out-Null
 
-   Get-AzStorageBlob -Context $ctx -Container 'validation' | Select-Object Name
+   Get-AzStorageBlob -Context $ctx -Container $containerName | Select-Object Name
    ```
+   Adjust `$resourceGroup` if it doesn't match your environment.
 
-4. Confirm that `quality-gate.json` appears in the output.
+4. Confirm that `quality-gate.json` appears in the output alongside `cdc-ingestion.json` and `scd-type2.json` from the earlier challenges.
 
 <validation step="Spark quality gate behavior"/>
 

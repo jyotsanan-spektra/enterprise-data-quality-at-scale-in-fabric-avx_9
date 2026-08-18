@@ -47,18 +47,25 @@ In this task, you will create the primary storage and analytical items for the m
 1. In your new workspace, select **+ New item**.
 2. In the item picker, search for **Lakehouse**, and then select **Lakehouse**.
 3. In the **New lakehouse** dialog, enter **contoso_medallion_lh** as the name.
-4. Leave the default **Lakehouse schemas** setting enabled unless your environment requires a different setting, and then select **Create**.
-5. Wait for the Lakehouse to open in the explorer view.
-6. Confirm that the new Lakehouse contains the **Tables** and **Files** areas.
-7. Return to the workspace.
-8. Select **+ New item** again.
-9. Search for **Warehouse**, and then select **Warehouse**.
-10. In the **New warehouse** dialog, enter **contoso_gold_wh** as the name.
-11. Select **Create**.
-12. Wait until the Warehouse opens successfully.
-13. In the Warehouse, note that this item will later host the Gold-layer customer dimension and SCD Type 2 logic.
-14. Select **Settings** (or the connection icon) on the Warehouse ribbon and record both the **SQL connection string** and the **JDBC connection string** shown there. Save these values in `C:\LabFiles\fabric-item-names.txt` — later challenges reuse them to reach `contoso_gold_wh` from a notebook or pipeline activity without querying through the attached-item experience.
-15. Return to the workspace and verify that both **contoso_medallion_lh** and **contoso_gold_wh** are now listed.
+4. In the **Sensitivity** field, select the **Confidential - Internal** label. This field is mandatory in tenants with a sensitivity label policy enabled, and every learner-created item in this lab should carry this same label so later sharing and access checks behave consistently.
+5. Leave the default **Lakehouse schemas** setting enabled unless your environment requires a different setting, and then select **Create**.
+6. Wait for the Lakehouse to open in the explorer view.
+7. Confirm that the new Lakehouse contains the **Tables** and **Files** areas.
+8. Return to the workspace.
+9. Select **+ New item** again.
+10. Search for **Warehouse**, and then select **Warehouse**.
+11. In the **New warehouse** dialog, enter **contoso_gold_wh** as the name.
+12. In the **Sensitivity** field, select the **Confidential - Internal** label, matching the label applied to **contoso_medallion_lh**.
+13. Select **Create**.
+14. Wait until the Warehouse opens successfully.
+15. In the Warehouse, note that this item will later host the Gold-layer customer dimension and SCD Type 2 logic.
+16. Select **Settings** (the gear icon, or right-click the item and select **Settings**), then select the **SQL endpoint** tab. Record the **SQL connection string** shown there in `C:\LabFiles\fabric-item-names.txt`.
+    > [!Note]
+    > Fabric Warehouse only exposes a single **SQL connection string** field in this settings pane — there is no separate JDBC connection string shown in the Fabric portal UI. If a later step calls for a JDBC connection string, reuse the same value with the standard JDBC prefix, for example:
+    > `jdbc:sqlserver://<sql-connection-string>:1433;database=contoso_gold_wh;encrypt=true;trustServerCertificate=false;hostNameInCertificate=*.datawarehouse.fabric.microsoft.com;authentication=ActiveDirectoryInteractive`
+    > Record both the raw SQL connection string and this constructed JDBC form in the notes file so there is no confusion later about which value to use.
+17. While still in **Settings**, select the **Sensitivity label** tab and confirm it shows **Confidential - Internal**. If it does not, select **Confidential - Internal** and select **Apply**.
+18. Return to the workspace and verify that both **contoso_medallion_lh** and **contoso_gold_wh** are now listed.
 
 > [!Important]
 > Create a blank Warehouse, not a sample warehouse. You need an empty object that you will configure during later challenges.
@@ -70,24 +77,27 @@ In this task, you will create the remaining Fabric items that support Spark vali
 1. In the workspace, select **+ New item**.
 2. Search for **Notebook**, and then select **Notebook**.
 3. Create a notebook named **nb_data_quality_gate**.
-4. When the notebook opens, confirm that the default notebook canvas is available, and then return to the workspace.
-5. Select **+ New item**.
-6. Search for **Data pipeline**, and then select **Data pipeline**.
-7. Create a pipeline named **contoso-medallion-orchestration**.
-8. When the pipeline canvas opens, confirm it loads successfully, and then return to the workspace.
-9. Select **+ New item** one more time.
-10. Search for **Copy job**, and then select **Copy job**.
-11. Enter **orders-to-bronze-cdc** as the copy job name, and create the item.
-12. When the copy job interface opens, stop before configuring the source and destination because that work is completed in the next challenge.
-13. Return to the workspace.
-14. Verify that all six learner-created Fabric items are visible in the workspace:
+4. When the notebook opens, confirm that the default notebook canvas is available.
+5. Select **Settings** (or right-click the notebook in the workspace list and select **Settings**), select the **Sensitivity label** tab, select **Confidential - Internal**, and select **Apply**. Then return to the workspace.
+6. Select **+ New item**.
+7. Search for **Data pipeline**, and then select **Data pipeline**.
+8. Create a pipeline named **contoso-medallion-orchestration**.
+9. When the pipeline canvas opens, confirm it loads successfully.
+10. Select **Settings**, select the **Sensitivity label** tab, select **Confidential - Internal**, and select **Apply**. Then return to the workspace.
+11. Select **+ New item** one more time.
+12. Search for **Copy job**, and then select **Copy job**.
+13. Enter **orders-to-bronze-cdc** as the copy job name, and create the item.
+14. When the copy job interface opens, stop before configuring the source and destination because that work is completed in the next challenge.
+15. Select **Settings**, select the **Sensitivity label** tab, select **Confidential - Internal**, and select **Apply**.
+16. Return to the workspace.
+17. Verify that all six learner-created Fabric items are visible in the workspace, and that **contoso_medallion_lh**, **contoso_gold_wh**, **nb_data_quality_gate**, **contoso-medallion-orchestration**, and **orders-to-bronze-cdc** all show the **Confidential - Internal** sensitivity label:
     - **contoso-fabric-<inject key="DeploymentID"></inject>**
     - **contoso_medallion_lh**
     - **contoso_gold_wh**
     - **nb_data_quality_gate**
     - **contoso-medallion-orchestration**
     - **orders-to-bronze-cdc**
-15. Record these exact names in your notes because you will reuse them throughout the lab.
+18. Record these exact names in your notes because you will reuse them throughout the lab.
 
 ## Task 4: Verify target-state readiness for the remaining challenges
 
