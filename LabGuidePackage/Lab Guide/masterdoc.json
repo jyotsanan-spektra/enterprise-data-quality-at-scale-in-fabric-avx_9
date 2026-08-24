@@ -1,0 +1,41 @@
+[
+  {
+    "Name": "Enterprise Data Quality at Scale in Fabric",
+    "Language": "English",
+    "BaseURL": "https://docs-api.cloudlabs.ai/repos/github.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9",
+    "Files": [
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/overview.md",
+        "Order": 1
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/GettingStarted-V2.md",
+        "Order": 2
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-01.md",
+        "Order": 3
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-02.md",
+        "Order": 4
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-03.md",
+        "Order": 5
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-04.md",
+        "Order": 6
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-05.md",
+        "Order": 7
+      },
+      {
+        "RawFilePath": "https://docs-api.cloudlabs.ai/repos/raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/refs/heads/cloudlabs/v1-enterprise-data-quality-at-scale-in-fabr-20260811/LabGuidePackage/Lab%20Guide/Lab%20Guide/Exercise-06.md",
+        "Order": 8
+      }
+    ]
+  }
+]

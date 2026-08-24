@@ -1,0 +1,51 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vmAdminUsername": {
+      "value": "demouser"
+    },
+    "vmAdminPassword": {
+      "value": "demo!pass123"
+    },
+    "adminUsername": {
+      "value": "demouser"
+    },
+    "adminPassword": {
+      "value": "demo!pass123"
+    },
+    "AzureUserName": {
+      "value": "GET-AZUSER-UPN"
+    },
+    "AzurePassword": {
+      "value": "GET-AZUSER-PASSWORD"
+    },
+    "ODLID": {
+      "value": "GET-ODL-ID"
+    },
+    "azuserobjectid": {
+      "value": "GET-AZUSER-OBJECTID"
+    },
+    "ServicePrincipalClientId": {
+      "value": "GET-SERVICEPRINCIPAL-APPLICATION-ID"
+    },
+    "ClientSecret": {
+      "value": "GET-SERVICEPRINCIPAL-SECRET"
+    },
+    "DeploymentID": {
+      "value": "GET-DEPLOYMENT-ID"
+    },
+    "trainerUserName": {
+      "value": "trainer"
+    },
+    "trainerUserPassword": {
+      "value": "Password.!!1"
+    },
+    "sqlAdminUsername": {
+      "value": "cdqadmin"
+    },
+    "sqlAdminPassword": {
+      "value": "Password.!!1"
+    }
+  }
+}

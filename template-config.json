@@ -1,0 +1,12 @@
+{
+  "name": "Enterprise Data Quality at Scale in Fabric",
+  "cloud": "azure",
+  "level": "Advanced",
+  "deploymentDurationMinutes": 240,
+  "enableLabValidation": true,
+  "hasInlineQuestions": false,
+  "customPolicy": true,
+  "customRbacRole": true,
+  "cloudScope": null,
+  "policyPack": null
+}

@@ -1,0 +1,412 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "AzureUserName": {
+      "type": "string"
+    },
+    "AzurePassword": {
+      "type": "securestring"
+    },
+    "DeploymentID": {
+      "type": "string"
+    },
+    "ODLID": {
+      "type": "string"
+    },
+    "diskStorageType": {
+      "defaultValue": "StandardSSD_LRS",
+      "type": "string"
+    },
+    "vmAdminUsername": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "vmAdminPassword": {
+      "defaultValue": "",
+      "type": "SecureString"
+    },
+    "adminUsername": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "adminPassword": {
+      "defaultValue": "",
+      "type": "SecureString"
+    },
+    "azuserobjectid": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "ServicePrincipalClientId": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "ClientSecret": {
+      "defaultValue": "",
+      "type": "string"
+    },
+    "trainerUserName": {
+      "defaultValue": "trainer",
+      "type": "string"
+    },
+    "trainerUserPassword": {
+      "defaultValue": "Password.!!1",
+      "type": "string"
+    },
+    "sqlAdminUsername": {
+      "defaultValue": "cdqadmin",
+      "type": "string"
+    },
+    "sqlAdminPassword": {
+      "defaultValue": "Contoso.Fabric!2026",
+      "type": "securestring"
+    }
+  },
+  "variables": {
+    "vmUser": "[if(empty(parameters('vmAdminUsername')), parameters('adminUsername'), parameters('vmAdminUsername'))]",
+    "vmPass": "[if(empty(parameters('vmAdminPassword')), parameters('adminPassword'), parameters('vmAdminPassword'))]",
+    "cloudlabsCommon": "[concat(' -AzureUserName ', parameters('AzureUserName'), ' -AzurePassword ', parameters('AzurePassword'), ' -AzureTenantID ', variables('AzureTenantID'), ' -AzureSubscriptionID ', variables('AzureSubscriptionID'), ' -ODLID ', parameters('ODLID'), ' -DeploymentID ', parameters('DeploymentID'),' -azuserobjectid ', parameters('azuserobjectid'))]",
+    "Enable-CloudLabsEmbeddedShadow": "[concat(' -vmAdminUsername ', variables('vmUser'), ' -trainerUserName ', parameters('trainerUserName'), ' -trainerUserPassword ', parameters('trainerUserPassword'))]",
+    "labSpecific": "[concat(' -SqlServerFqdn ', variables('sqlServerFqdn'), ' -SqlDatabaseName ', variables('sqlDatabaseName'), ' -SqlAdminUsername ', parameters('sqlAdminUsername'), ' -SqlAdminPassword ', parameters('sqlAdminPassword'))]",
+    "AzureSubscriptionID": "[subscription().subscriptionId]",
+    "AzureTenantID": "[subscription().tenantId]",
+    "location": "[resourceGroup().location]",
+    "subnetPrefix": "10.0.0.0/24",
+    "addressPrefix": "10.0.0.0/16",
+    "jumphost": "[concat('labvm-',parameters('DeploymentID'))]",
+    "networkInterfaceName1": "[concat(variables('jumphost'), '-nic')]",
+    "virtualNetworkName1": "labvm-vnet1",
+    "subnetName1": "Subnet1",
+    "virtualMachineSize": "Standard_B2ms",
+    "vnetId1": "[resourceId(resourceGroup().name,'Microsoft.Network/virtualNetworks', variables('virtualNetworkName1'))]",
+    "subnetRef1": "[concat(variables('vnetId1'), '/subnets/', variables('subnetName1'))]",
+    "publicIpAddressName1": "[concat(variables('jumphost'), '-pip')]",
+    "vmPublicIpDnsName": "[concat('labvm',uniqueString(resourceGroup().id))]",
+    "networkSecurityGroupName1": "[concat(variables('jumphost'), '-nsg')]",
+    "deploymentIdNoHyphens": "[replace(toLower(parameters('DeploymentID')), '-', '')]",
+    "storageAccountName": "[concat('stfabricval', substring(variables('deploymentIdNoHyphens'), 0, min(12, length(variables('deploymentIdNoHyphens')))))]",
+    "validationContainerName": "validation",
+    "sqlServerName": "[concat('sql-cdq-', toLower(parameters('DeploymentID')))]",
+    "sqlDatabaseName": "Contoso_Operations",
+    "sqlServerFqdn": "[concat(variables('sqlServerName'), '.database.windows.net')]",
+    "bootstrapScriptUrl": "https://raw.githubusercontent.com/jyotsanan-spektra/enterprise-data-quality-at-scale-in-fabric-avx_9/9fa8cde060d511626ab21000266f80d797f07a68/DeploymentPackage/psscript-01.ps1"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2017-04-01",
+      "name": "[variables('virtualNetworkName1')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('addressPrefix')]"
+          ]
+        },
+        "subnets": [
+          {
+            "name": "[variables('subnetName1')]",
+            "properties": {
+              "addressPrefix": "[variables('subnetPrefix')]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "2018-11-30",
+      "name": "nsdeploy",
+      "location": "[variables('location')]",
+      "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+      "properties": {},
+      "tags": {}
+    },
+    {
+      "type": "Microsoft.Network/publicIpAddresses",
+      "apiVersion": "2019-02-01",
+      "name": "[variables('publicIpAddressName1')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "Standard"
+      },
+      "properties": {
+        "publicIpAllocationMethod": "Static",
+        "dnsSettings": {
+          "domainNameLabel": "[variables('vmPublicIpDnsName')]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2017-06-01",
+      "name": "[variables('networkSecurityGroupName1')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "default-allow-rdp",
+            "properties": {
+              "priority": 110,
+              "protocol": "TCP",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "3389"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2016-09-01",
+      "name": "[variables('networkInterfaceName1')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/virtualNetworks/', variables('virtualNetworkName1'))]",
+        "[concat('Microsoft.Network/publicIpAddresses/', variables('publicIpAddressName1'))]",
+        "[concat('Microsoft.Network/networkSecurityGroups/', variables('networkSecurityGroupName1'))]"
+      ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[variables('subnetRef1')]"
+              },
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIpAddress": {
+                "id": "[resourceId(resourceGroup().name,'Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1'))]"
+              }
+            }
+          }
+        ],
+        "networkSecurityGroup": {
+          "id": "[resourceId(resourceGroup().name, 'Microsoft.Network/networkSecurityGroups', variables('networkSecurityGroupName1'))]"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-05-01",
+      "name": "[variables('storageAccountName')]",
+      "location": "[variables('location')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot",
+        "allowBlobPublicAccess": false,
+        "allowSharedKeyAccess": true,
+        "minimumTlsVersion": "TLS1_2",
+        "publicNetworkAccess": "Enabled",
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-05-01",
+      "name": "[concat(variables('storageAccountName'), '/default/', variables('validationContainerName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ],
+      "properties": {
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[variables('sqlServerName')]",
+      "location": "[variables('location')]",
+      "properties": {
+        "administratorLogin": "[parameters('sqlAdminUsername')]",
+        "administratorLoginPassword": "[parameters('sqlAdminPassword')]",
+        "version": "12.0",
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/databases",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/', variables('sqlDatabaseName'))]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
+      ],
+      "sku": {
+        "name": "S3",
+        "tier": "Standard"
+      },
+      "properties": {
+        "collation": "SQL_Latin1_General_CP1_CI_AS"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/AllowAllWindowsAzureIps')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]"
+      ],
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2023-05-01-preview",
+      "name": "[concat(variables('sqlServerName'), '/Allow-Lab-VM')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', variables('sqlServerName'))]",
+        "[resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1'))]"
+      ],
+      "properties": {
+        "startIpAddress": "[reference(resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1')), '2019-02-01').ipAddress]",
+        "endIpAddress": "[reference(resourceId('Microsoft.Network/publicIpAddresses', variables('publicIpAddressName1')), '2019-02-01').ipAddress]"
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-03-01",
+      "name": "[variables('jumphost')]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceName1'))]"
+      ],
+      "properties": {
+        "osProfile": {
+          "computerName": "[variables('jumphost')]",
+          "adminUsername": "[variables('vmUser')]",
+          "adminPassword": "[variables('vmPass')]",
+          "windowsConfiguration": {
+            "provisionVmAgent": "true"
+          }
+        },
+        "hardwareProfile": {
+          "vmSize": "[variables('virtualMachineSize')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "MicrosoftWindowsServer",
+            "offer": "WindowsServer",
+            "sku": "2022-datacenter-g2",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[concat(variables('jumphost'),'OSDisk')]",
+            "createOption": "FromImage",
+            "managedDisk": {
+              "storageAccountType": "[parameters('diskStorageType')]"
+            }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceName1'))]"
+            }
+          ]
+        }
+      },
+      "resources": [
+        {
+          "type": "Microsoft.Compute/virtualMachines/extensions",
+          "apiVersion": "2015-06-15",
+          "name": "[concat(variables('jumphost'),'/', 'winExtension')]",
+          "location": "[variables('location')]",
+          "dependsOn": [
+            "[concat('Microsoft.Compute/virtualMachines/', variables('jumphost'))]",
+            "[resourceId('Microsoft.Sql/servers/databases', variables('sqlServerName'), variables('sqlDatabaseName'))]",
+            "[resourceId('Microsoft.Sql/servers/firewallRules', variables('sqlServerName'), 'AllowAllWindowsAzureIps')]",
+            "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('storageAccountName'), 'default', variables('validationContainerName'))]"
+          ],
+          "tags": {
+            "displayName": "VM Extension"
+          },
+          "properties": {
+            "publisher": "Microsoft.Compute",
+            "type": "CustomScriptExtension",
+            "typeHandlerVersion": "1.8",
+            "autoUpgradeMinorVersion": true,
+            "settings": {
+              "fileUris": [
+                "https://experienceazure.blob.core.windows.net/templates/cloudlabs-common/cloudlabs-windows-functions.ps1",
+                "[variables('bootstrapScriptUrl')]"
+              ]
+            },
+            "protectedSettings": {
+              "commandToExecute": "[concat('powershell.exe -ExecutionPolicy ByPass -File psscript-01.ps1', variables('cloudlabsCommon'), variables('Enable-CloudLabsEmbeddedShadow'), variables('labSpecific'))]"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "Microsoft.DevTestLab/schedules",
+      "apiVersion": "2018-09-15",
+      "name": "[concat('shutdown-computevm-', variables('jumphost'))]",
+      "location": "[variables('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', variables('jumphost'))]"
+      ],
+      "properties": {
+        "status": "Enabled",
+        "taskType": "ComputeVmShutdownTask",
+        "dailyRecurrence": {
+          "time": "1900"
+        },
+        "timeZoneId": "UTC",
+        "notificationSettings": {
+          "status": "Disabled",
+          "timeInMinutes": 30
+        },
+        "targetResourceId": "[resourceId('Microsoft.Compute/virtualMachines', variables('jumphost'))]"
+      }
+    }
+  ],
+  "outputs": {
+    "LABVM Admin Username": {
+      "type": "String",
+      "value": "[variables('vmUser')]"
+    },
+    "LABVM Admin Password": {
+      "type": "String",
+      "value": "[variables('vmPass')]"
+    },
+    "LABVM DNS Name": {
+      "type": "String",
+      "value": "[concat(variables('vmPublicIpDnsName'), '.', resourceGroup().location, '.cloudapp.azure.com')]"
+    },
+    "Deployment ID": {
+      "type": "String",
+      "value": "[parameters('DeploymentID')]"
+    },
+    "SQL Server Name": {
+      "type": "String",
+      "value": "[variables('sqlServerFqdn')]"
+    },
+    "SQL Database Name": {
+      "type": "String",
+      "value": "[variables('sqlDatabaseName')]"
+    },
+    "SQL Admin Username": {
+      "type": "String",
+      "value": "[parameters('sqlAdminUsername')]"
+    },
+    "SQL Admin Password": {
+      "type": "String",
+      "value": "[parameters('sqlAdminPassword')]"
+    },
+    "Validation Storage Account": {
+      "type": "String",
+      "value": "[variables('storageAccountName')]"
+    }
+  }
+}

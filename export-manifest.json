@@ -1,0 +1,216 @@
+{
+  "packageId": "ad9e12f4-daba-4520-8ec3-90e1b2131b93",
+  "slug": "enterprise-data-quality-at-scale-in-fabric-avx_9",
+  "title": "Enterprise Data Quality at Scale in Fabric",
+  "version": 1,
+  "exportedAt": "2026-08-11T11:53:06.190Z",
+  "exportTarget": "github_new_repo",
+  "force": false,
+  "deliverableConfig": {
+    "arm": {
+      "stages": 1,
+      "enabled": true
+    },
+    "cse": {
+      "enabled": true
+    },
+    "rbac": {
+      "enabled": true
+    },
+    "policy": {
+      "enabled": true
+    },
+    "readme": {
+      "enabled": true
+    },
+    "labGuide": {
+      "enabled": true,
+      "exercises": 6
+    },
+    "solution": {
+      "enabled": false
+    },
+    "questions": {
+      "count": 0,
+      "enabled": false
+    },
+    "specSheet": {
+      "enabled": true
+    },
+    "validations": {
+      "count": 6,
+      "enabled": true
+    }
+  },
+  "artifacts": [
+    {
+      "path": "DeploymentPackage/deploy-01.json",
+      "kind": "arm",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "DeploymentPackage/deploy-01.parameters.json",
+      "kind": "arm_params",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "DeploymentPackage/psscript-01.ps1",
+      "kind": "psscript",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-01.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-02.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-03.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-04.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-05.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-06.md",
+      "kind": "exercise_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/Lab Guide/GettingStarted-V2.md",
+      "kind": "getting_started",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "permissions/CustomARMPolicy/azure-policy.json",
+      "kind": "policy_json",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "permissions/CustomRBAC/custom-rbac-role.json",
+      "kind": "rbac_json",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Spec.md",
+      "kind": "spec_md",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/01-task-prerequisite-environment-readiness.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/02-task-cdc-ingestion-bronze-orders.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/03-task-scd-type-2-customer-dimension.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/04-task-spark-quality-gate.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/05-task-silver-recovery.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "Validations/06-task-orchestration-run-state-evidence.ps1",
+      "kind": "validation_ps1",
+      "lintStatus": "passed"
+    },
+    {
+      "path": "LabGuidePackage/Lab Guide/masterdoc.json",
+      "kind": "masterdoc",
+      "lintStatus": null
+    },
+    {
+      "path": "template-config.json",
+      "kind": "template_config",
+      "lintStatus": null
+    }
+  ],
+  "errors": [],
+  "coherence": [
+    {
+      "severity": "info",
+      "rule": "coherence-validation-step-unmatched",
+      "message": "Validation step \"Validate prerequisite environment readiness and required Fabric object baseline for the medallion scenario.\" has no clearly-matching validation script under Validations/. Confirm a backing .ps1/.sh exists.",
+      "artifactPath": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-01.md"
+    },
+    {
+      "severity": "info",
+      "rule": "coherence-validation-step-unmatched",
+      "message": "Validation step \"CDC ingestion outcomes\" has no clearly-matching validation script under Validations/. Confirm a backing .ps1/.sh exists.",
+      "artifactPath": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-02.md"
+    },
+    {
+      "severity": "info",
+      "rule": "coherence-validation-step-unmatched",
+      "message": "Validation step \"Validate SCD Type 2 behavior in the customer dimension, including current/expired row states.\" has no clearly-matching validation script under Validations/. Confirm a backing .ps1/.sh exists.",
+      "artifactPath": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-03.md"
+    },
+    {
+      "severity": "info",
+      "rule": "coherence-validation-step-unmatched",
+      "message": "Validation step \"Spark quality gate behavior\" has no clearly-matching validation script under Validations/. Confirm a backing .ps1/.sh exists.",
+      "artifactPath": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-04.md"
+    },
+    {
+      "severity": "info",
+      "rule": "coherence-validation-step-unmatched",
+      "message": "Validation step \"Validate orchestration success/failure run states and dependency behavior using internal pipeline evidence.\" has no clearly-matching validation script under Validations/. Confirm a backing .ps1/.sh exists.",
+      "artifactPath": "LabGuidePackage/Lab Guide/Lab Guide/Exercise-06.md"
+    },
+    {
+      "severity": "warning",
+      "rule": "coherence-validator-rg-mismatch",
+      "message": "Validators reference 3 different resource-group names (rg-fabric, rg-fabric-challenge, rg-fabricdataquality). They should all target the same lab resource group — reconcile them (prefer a CloudLabs inject placeholder over a hardcoded name).",
+      "artifactPath": "(package)"
+    },
+    {
+      "severity": "error",
+      "rule": "coherence-rbac-missing-provider",
+      "message": "The ARM template deploys microsoft.keyvault/vaults, microsoft.containerregistry/registries, microsoft.cognitiveservices/accounts, microsoft.cognitiveservices/accounts/deployments, microsoft.machinelearningservices/workspaces, but the custom RBAC role's Actions never allow these providers/types — the deployment can fail with an authorization error. Add \"microsoft.keyvault/vaults/write\", \"microsoft.containerregistry/registries/write\", \"microsoft.cognitiveservices/accounts/write\", \"microsoft.cognitiveservices/accounts/deployments/write\", \"microsoft.machinelearningservices/workspaces/write\" (or the provider wildcard, e.g. \"microsoft.keyvault/*\") to the role's Actions.",
+      "artifactPath": "permissions/CustomRBAC/custom-rbac-role.json"
+    },
+    {
+      "severity": "warning",
+      "rule": "coherence-vm-missing-auto-shutdown",
+      "message": "The template deploys a virtual machine but no auto-shutdown schedule — the VM keeps billing after the session ends. Add a Microsoft.DevTestLab/schedules resource per VM (taskType \"ComputeVmShutdownTask\", name \"shutdown-computevm-<vmName>\") with a dailyRecurrence time.",
+      "artifactPath": "DeploymentPackage/deploy-01.json"
+    }
+  ],
+  "runnability": {
+    "issues": [
+      {
+        "severity": "blocking",
+        "rule": "control-plane-not-provisioned",
+        "message": "The guide says a Microsoft Fabric / Power BI item (workspace, lakehouse, warehouse, semantic model) is pre-seeded, but ARM/Bicep cannot create control-plane objects and no artifact seeds them via the service REST API (api.fabric.microsoft.com / api.powerbi.com). Either (a) make the learner create the items as explicit exercise tasks (guide + validations must match), or (b) add a bootstrap that seeds them through the REST API with an auth token — only then may the guide say \"pre-seeded\".",
+        "artifactPath": "(package)"
+      }
+    ],
+    "blocking": 1,
+    "warning": 0,
+    "info": 0
+  }
+}
